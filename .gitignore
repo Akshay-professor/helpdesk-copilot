@@ -1,0 +1,22 @@
+# Secrets — never commit these
+.env
+.env.local
+
+# The personal learning log. 9,500+ lines of working notes, kept local.
+progress.md
+docs/progress.md
+
+# Build output
+dist/
+build/
+
+# Installed packages — rebuilt from package.json via `npm install`
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
