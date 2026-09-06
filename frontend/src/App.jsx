@@ -3,6 +3,7 @@ import { streamChat, confirmAction, getHealth } from "./api";
 import ConfirmModal from "./ConfirmModal";
 import TraceViewer from "./TraceViewer";
 import OperatorQueue from "./OperatorQueue";
+import VoiceCall from "./VoiceCall";
 import CostDashboard from "./CostDashboard";
 import { getApprovals } from "./api";
 
@@ -175,6 +176,12 @@ export default function App() {
           >
             Costs
           </button>
+          <button
+            className={`tab ${view === "voice" ? "on" : ""}`}
+            onClick={() => setView("voice")}
+          >
+            Voice
+          </button>
         </div>
 
         <label className="toggle" title="Route this request through the coordinator and its specialists">
@@ -196,7 +203,9 @@ export default function App() {
         <span className="pill">{stats.tokensUsed.toLocaleString()} tokens</span>
       </div>
 
-      {view === "queue" ? (
+      {view === "voice" ? (
+        <VoiceCall />
+      ) : view === "queue" ? (
         <OperatorQueue />
       ) : view === "costs" ? (
         <CostDashboard />
