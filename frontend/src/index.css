@@ -366,3 +366,71 @@ h3.section {
   border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
   border-radius: 3px; padding: 0 5px; margin-right: 6px;
 }
+
+/* ---------- voice call ---------- */
+.voice { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 18px 24px 20px; }
+
+.voice-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.voice-head h2 { margin: 0; font-size: 17px; }
+.grow { flex: 1; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.dot.connecting { background: var(--warn); }
+.dot.ended { background: var(--danger); }
+
+.voice-body { flex: 1; display: flex; gap: 18px; min-height: 0; }
+
+.transcript {
+  flex: 1; overflow-y: auto; padding: 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+}
+
+.turn { display: flex; gap: 10px; margin-bottom: 12px; align-items: baseline; }
+.turn-who {
+  min-width: 46px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted);
+}
+.turn-text { flex: 1; }
+.turn.caller .turn-text { color: var(--accent); }
+.turn.system .turn-text, .turn.muted .turn-text { color: var(--muted); font-size: 13px; }
+.turn.filler .turn-text { color: var(--muted); font-style: italic; }
+.turn.bad .turn-text { color: var(--danger); }
+.turn.confirm .turn-text { color: var(--warn); }
+.turn-tag {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em;
+  padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border);
+  color: var(--muted);
+}
+.turn-tag.warn { color: var(--warn); border-color: var(--warn); }
+
+.voice-activity {
+  margin-top: 10px; padding: 9px 11px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+}
+
+.voice-controls {
+  width: 320px; display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 9px;
+}
+
+.meter { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--ok); transition: width 60ms linear; }
+
+.mic {
+  padding: 22px 14px; border-radius: 9px; font-size: 14px; font-weight: 600;
+  background: var(--panel-2); border: 1px solid var(--border); user-select: none;
+}
+.mic.on {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: var(--danger); color: var(--danger);
+}
+
+.voice-typed { display: flex; gap: 7px; }
+.voice-typed input {
+  flex: 1; min-width: 0; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font: inherit;
+}

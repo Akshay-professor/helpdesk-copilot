@@ -16,15 +16,38 @@
 
 ---
 
-## What this is
+## What it does, in one paragraph
 
-A chatbot that returns a wrong answer wastes your time. **An agent that decides wrongly issues a refund, sends an email, or deletes a record.**
+**It is the customer support desk for an online store — staffed by an AI that can actually do things, not just chat about them.**
 
-Every design decision in this project exists because of that difference.
+A customer types *"I was charged twice, please refund it."* The system looks up their account, finds the two identical invoices, checks the refund policy, and issues the refund. If the amount is small it just does it. **If it's large, it stops and waits for a human to click Approve.** If it's huge, it refuses and escalates.
 
-HelpDesk Copilot handles real support work for an online store — looking up orders, explaining policies from a knowledge base, issuing refunds, applying account credit, changing plans. It decides *how much autonomy each request deserves*, pauses before anything irreversible, checks its own work, and admits what it could not determine.
+Same thing works over the phone — you talk, it talks back.
 
-It runs over **chat** and over **voice**, on the same agent core.
+### Try it in 30 seconds
+
+| You say | What happens |
+|---|---|
+| *"Where is order ord_1001?"* | Answers in **12ms using zero AI** — it's a database lookup, why pay for a model? |
+| *"I'm alice@shop.com — was I charged twice?"* | Finds two $240 invoices for the same order, same day |
+| *"Refund $240 on ord_1001"* | **Stops.** Waits for a human. $240 is above the auto-approve line |
+| *"Refund $5000 on ord_1001"* | **Refuses.** Above the ceiling — no human can approve it either |
+| *"Who is the PM of India?"* | Politely declines. Costs nothing |
+
+### Why anyone would build this
+
+A chatbot that gets it wrong wastes your time. **An agent that gets it wrong sends someone money.**
+
+That single sentence explains every design decision here — the approval pauses, the spending limits written in code rather than in a prompt, the full audit trail, and the fact that the agent double-checks its own answer before sending it.
+
+### The four screens
+
+| Tab | Who uses it | What they see |
+|---|---|---|
+| **Chat** | Customer | Conversation + every tool call as it happens |
+| **Approvals** | Support supervisor | Pending refunds to approve, reject, or **edit the amount** |
+| **Costs** | Whoever pays the bill | Tokens and latency per agent |
+| **Voice** | Customer | Hold-to-talk phone call with the same agent |
 
 ---
 
@@ -269,29 +292,87 @@ SPOKEN   "You have three invoices. The most recent is invoice
 
 ## Getting started
 
-**Prerequisites:** Node 20+, Docker, a [Mistral API key](https://console.mistral.ai) (free tier), a [Groq API key](https://console.groq.com) (free)
+**You need:** [Node 20+](https://nodejs.org), [Docker Desktop](https://docker.com/products/docker-desktop), and two free API keys — [Mistral](https://console.mistral.ai/api-keys) (required) and [Groq](https://console.groq.com/keys) (optional, but needed for voice).
+
+> **You will need two terminals** — one for the backend, one for the frontend. They both stay running.
+
+### Step 1 — Get the code
 
 ```bash
 git clone https://github.com/Akshay-professor/helpdesk-copilot.git
 cd helpdesk-copilot
+```
 
-# 1. Data services
+### Step 2 — Start the three databases
+
+These run in Docker so you don't have to install anything. **Run once**; afterwards use `docker start` instead.
+
+```bash
 docker run -d --name helpdesk-mongo  -p 27017:27017 mongo:8
 docker run -d --name helpdesk-chroma -p 8000:8000   chromadb/chroma
 docker run -d --name helpdesk-redis  -p 6379:6379   redis:7-alpine
+```
 
-# 2. Backend
+Check all three are up:
+
+```bash
+docker ps          # should list three helpdesk-* containers
+```
+
+### Step 3 — Backend  *(terminal 1)*
+
+```bash
 cd backend
 npm install
-cp .env.example .env        # add your two API keys
-node seed-db.js             # load fixture data
-node src/server.js          # http://localhost:5000
 
-# 3. Frontend (new terminal)
+cp .env.example .env      # then open .env and paste your API keys
+
+node seed-db.js           # loads 3 customers, 6 orders, 5 invoices
+node index-kb.js          # loads 12 policy documents into ChromaDB
+node src/server.js        # → http://localhost:5000
+```
+
+**Leave this terminal running.** You should see:
+
+```
+[db] connected to MongoDB
+[redis] connected
+[rag] connected to ChromaDB
+[voice] websocket listening on /voice
+Server running on port 5000
+```
+
+### Step 4 — Frontend  *(terminal 2)*
+
+```bash
 cd frontend
 npm install
-npm run dev                 # http://localhost:5173
+npm run dev               # → http://localhost:5173
 ```
+
+**Open http://localhost:5173 in your browser.** You should see four tabs: Chat, Approvals, Costs, Voice.
+
+### Coming back later
+
+Docker containers stop when you restart your computer. To resume:
+
+```bash
+docker start helpdesk-mongo helpdesk-chroma helpdesk-redis
+cd backend  && node src/server.js     # terminal 1
+cd frontend && npm run dev            # terminal 2
+```
+
+### If something is wrong
+
+| Symptom | Fix |
+|---|---|
+| `db ?` or `kb ?` in the top bar | A container isn't running — `docker ps` to check, `docker start helpdesk-mongo helpdesk-chroma helpdesk-redis` |
+| `MISTRAL_API_KEY is not set` | Your `.env` is missing or the key line is blank |
+| `429 Rate limit exceeded` | Free-tier quota used up. Wait, or use a different key |
+| Policy answers say "I can't look that up" | You skipped `node index-kb.js` |
+| Voice tab won't connect | Backend isn't running, or `GROQ_API_KEY` is missing |
+| Port 5000 already in use | An old server is still running: `Get-Process node \| Stop-Process -Force` (PowerShell) |
+| A refund is capped oddly | Test data drifted — run `node seed-db.js` to reset |
 
 **Try these:**
 
