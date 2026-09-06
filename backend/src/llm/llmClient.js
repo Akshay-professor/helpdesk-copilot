@@ -14,6 +14,77 @@
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const DEFAULT_MODEL = "mistral-small-latest";
 
+// ---------------------------------------------------------------------------
+// THE FALLBACK PROVIDER
+// ---------------------------------------------------------------------------
+//
+// Added after a real incident: Mistral's free-tier daily quota ran out
+// mid-session and EVERY request started failing with 429. Retrying did not
+// help - retry is for a service that is briefly busy, not one that has told
+// you "you are done for today".
+//
+// Meanwhile Groq was sitting right there, configured, healthy, and unused.
+// We had a working LLM and did not call it.
+//
+// The distinction that matters:
+//
+//   RETRY     same provider, a moment later    "you are busy"
+//   FALLBACK  a different provider, now        "you are out of quota"
+//
+// Groq speaks the OpenAI chat-completions dialect, which Mistral also speaks,
+// so the request body needs no translation - only a different URL, key, and
+// model name. That is the whole reason a fallback is cheap here, and it is
+// worth noticing WHY: we never coupled ourselves to one provider's SDK.
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+//
+// Model choice: verified against the actual key with GET /v1/models rather
+// than assumed. The first attempt hard-coded "llama-3.3-70b-versatile", which
+// this account cannot access - a 404 that looked exactly like the fallback
+// "not working". Ask the provider what it has; do not guess from memory.
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-120b";
+
+/** Is a second provider available to fall back to? */
+function hasFallback() {
+  return Boolean(process.env.GROQ_API_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// THE CIRCUIT BREAKER
+// ---------------------------------------------------------------------------
+//
+// Falling back works, but the first version paid the full retry cost EVERY
+// time: 500ms + 1000ms wasted on a provider we already knew was out of quota,
+// on every single call. A voice turn makes ~3 LLM calls, so that was 4.5
+// seconds of pure waiting - enough to make a call feel broken.
+//
+// A daily quota does not recover in 500ms. Once we have seen it, believe it.
+//
+//   THE IDEA: after a rate-limit, stop knocking on that door for a while.
+//   Send everything straight to the fallback, and only try the primary again
+//   once the cool-down has passed.
+//
+// This is the standard "circuit breaker" pattern, and the name is apt: a
+// breaker trips to stop you repeatedly energising a circuit that is faulty.
+//
+// Deliberately NOT tripped by 5xx or network errors - those really can clear
+// in a second, and retry is the right answer for them. Only a 429 means
+// "stop asking".
+const BREAKER_COOLDOWN_MS = 60_000;
+let primaryDownUntil = 0;
+
+function primaryIsTripped() {
+  return Date.now() < primaryDownUntil;
+}
+
+function tripPrimary() {
+  if (!primaryIsTripped()) {
+    console.warn(
+      `[llm] Mistral rate-limited — skipping it for ${BREAKER_COOLDOWN_MS / 1000}s`
+    );
+  }
+  primaryDownUntil = Date.now() + BREAKER_COOLDOWN_MS;
+}
+
 /**
  * Send a conversation to the LLM and get its reply.
  *
@@ -80,6 +151,10 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
   let response;
   let lastError;
 
+  // Breaker open: do not even try the primary. Straight to the fallback.
+  if (primaryIsTripped() && hasFallback()) {
+    lastError = new Error("Mistral skipped — circuit breaker open (rate limited).");
+  } else
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       response = await fetch(MISTRAL_API_URL, {
@@ -98,8 +173,23 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
       const errorText = await response.text();
       lastError = new Error(`Mistral API error ${response.status}: ${errorText}`);
 
+      // BREAK, not throw. A `throw` here jumps past the fallback block below,
+      // which is exactly the bug that made the first version of this fallback
+      // do nothing at all: Mistral 429'd, all three retries were spent, and
+      // the throw skipped the healthy provider sitting one block away.
+      //
+      // `lastError` is still set, so the code after the loop can decide
+      // between falling back and giving up. Exiting a loop and abandoning the
+      // function are different intentions - use the one you actually mean.
+      // A 429 means the quota is gone, not that the server is briefly busy.
+      // Trip the breaker so the next caller does not repeat this wait.
+      if (response.status === 429) {
+        tripPrimary();
+        break;
+      }
+
       if (!RETRYABLE.includes(response.status) || attempt === MAX_ATTEMPTS) {
-        throw lastError;
+        break;
       }
 
       const waitMs = 500 * 2 ** (attempt - 1);
@@ -112,11 +202,69 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
       // A genuine network failure (DNS, connection refused) also lands here.
       // Same reasoning: retry it, because it is usually transient.
       lastError = err;
-      if (attempt === MAX_ATTEMPTS) throw err;
-      if (err.message?.startsWith("Mistral API error")) throw err; // already decided
+      // Same reasoning as above: break so the fallback gets its turn.
+      if (attempt === MAX_ATTEMPTS) break;
+      if (err.message?.startsWith("Mistral API error")) break; // already decided
       const waitMs = 500 * 2 ** (attempt - 1);
       console.warn(`[llm] network error, retrying in ${waitMs}ms: ${err.message}`);
       await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+
+  // ---- FALL BACK TO THE OTHER PROVIDER ----------------------------------
+  //
+  // Every retry is spent and we still have no answer. Before giving up, try
+  // the second provider - a 429 from Mistral says nothing at all about
+  // whether Groq is healthy.
+  //
+  // Note this is attempted for ANY exhausted failure, not only 429. If the
+  // primary is unreachable for any reason and a working alternative exists,
+  // using it is strictly better than returning an error to a customer.
+  if (!response?.ok && hasFallback()) {
+    console.warn(
+      `[llm] Mistral unavailable (${lastError?.message?.slice(0, 60)}…) — ` +
+        `falling back to Groq ${GROQ_FALLBACK_MODEL}`
+    );
+
+    try {
+      const fb = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        },
+        // Same body, different model. The dialect is identical.
+        body: JSON.stringify({ ...body, model: GROQ_FALLBACK_MODEL }),
+      });
+
+      if (fb.ok) {
+        const data = await fb.json();
+        const message = data.choices?.[0]?.message;
+        if (message) {
+          message._usage = data.usage ?? {};
+          // Mark it, so a trace shows WHICH provider answered. A silent
+          // fallback is a system that lies about its own behaviour.
+          message._provider = "groq";
+          return message;
+        }
+      }
+      // Report the FALLBACK's failure, not the primary's stale one.
+      //
+      // The first version let `lastError` stand, so when both providers were
+      // rate limited the thrown error read "circuit breaker open" - which
+      // describes our own bookkeeping, not what actually went wrong. Whoever
+      // reads that error needs to know BOTH doors were shut.
+      const fbText = await fb.text().catch(() => "");
+      lastError = new Error(
+        `All providers failed. Mistral: ${lastError?.message?.slice(0, 80) ?? "n/a"} | ` +
+          `Groq ${fb.status}: ${fbText.slice(0, 120)}`
+      );
+      console.warn(`[llm] fallback also failed (${fb.status})`);
+    } catch (err) {
+      lastError = new Error(
+        `All providers failed. Fallback threw: ${err.message}`
+      );
+      console.warn(`[llm] fallback threw: ${err.message}`);
     }
   }
 
@@ -138,6 +286,7 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
   // rather than part of the provider's message format - the loop strips it
   // before the message goes back to the API.
   message._usage = data.usage ?? {};
+  message._provider = "mistral";
 
   // We return the whole message object, not just message.content, because this
   // object also carries `tool_calls`. Returning the full object means the agent

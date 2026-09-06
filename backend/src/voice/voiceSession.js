@@ -464,10 +464,34 @@ class VoiceSession {
       return this.deliver(result, generation, transcript);
     } catch (err) {
       clearFillers();
-      const text =
-        "Sorry, something went wrong on my end. Could you try that again?";
+
+      // ---- SAY SOMETHING TRUE --------------------------------------------
+      //
+      // The old message was always "something went wrong, could you try that
+      // again?" - and a real call showed why that is bad. The provider was out
+      // of daily quota, so EVERY retry was guaranteed to fail, and the caller
+      // was invited to keep trying. Three times in a row, politely.
+      //
+      // An error message that suggests a useless action is worse than one that
+      // admits defeat: it wastes the caller's time and hides the real problem
+      // from whoever has to fix it.
+      const msg = String(err?.message ?? "");
+      const rateLimited = /429|rate limit|quota/i.test(msg);
+      const unreachable = /ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(msg);
+
+      const text = rateLimited
+        ? "I'm sorry — our service has hit its usage limit for now, so I " +
+          "can't look that up. Please try again later, or contact support by email."
+        : unreachable
+        ? "I'm sorry — I can't reach our systems at the moment. Please try again shortly."
+        : "Sorry, something went wrong on my end. Could you try that again?";
+
+      // Log the real cause. The caller gets a plain sentence; the operator
+      // needs the actual error, and neither should be given the other's.
+      console.error(`[voice] turn failed: ${msg.slice(0, 200)}`);
+
       this.emit("speak", { text, generation, kind: "error" });
-      return { transcript, reply: text, error: err.message };
+      return { transcript, reply: text, error: msg };
     }
   }
 

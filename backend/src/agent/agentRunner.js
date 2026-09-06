@@ -310,7 +310,24 @@ async function runLoop(state) {
     // the provider omits it, so default to 0 rather than producing NaN.
     const usage = assistantMessage._usage ?? {};
     tokensUsed += usage.total_tokens ?? 0;
-    delete assistantMessage._usage; // keep the transcript clean for the API
+    const provider = assistantMessage._provider ?? null;
+
+    // Strip EVERY underscore-prefixed key, not just the ones we happen to know
+    // about. The provider rejects unknown fields on a message it receives back
+    // (422 extra_forbidden), and the previous version deleted `_usage` by name
+    // - so the moment llmClient started attaching `_provider`, every
+    // multi-turn conversation broke.
+    //
+    // The convention is "underscore means OUR metadata". Enforcing the
+    // convention beats maintaining a list that some future field will fall off.
+    for (const k of Object.keys(assistantMessage)) {
+      if (k.startsWith("_")) delete assistantMessage[k];
+    }
+
+    if (provider && provider !== "mistral") {
+      // Visible in the trace: a run answered by the fallback should say so.
+      emit("thinking", { message: `answered by fallback provider: ${provider}` });
+    }
 
     messages.push(assistantMessage);
 
