@@ -802,6 +802,24 @@ const server = app.listen(PORT, () => {
 const { attachVoiceServer } = require("./voice/voiceServer");
 attachVoiceServer(server, { path: "/voice" });
 
+// ---------------------------------------------------------------------------
+// EXPIRE APPROVALS NOBODY ANSWERED
+// ---------------------------------------------------------------------------
+//
+// `expireStale()` had existed since Build 2 - written, exported, documented,
+// and never called by anything. So paused runs accumulated: 50 of them over
+// five days, the oldest 120 hours old, and the Approvals tab wore a permanent
+// red "50" badge.
+//
+// That badge is the actual damage. An operator who sees 50 items they know are
+// junk stops reading the queue, and the one real approval underneath waits
+// just as long as if there were no queue at all.
+//
+// The sweep runs once at boot (so a restart tidies up) and every 15 minutes
+// after.
+const { startExpirySweep } = require("./agent/approvals");
+startExpirySweep();
+
 /**
  * Shut down cleanly when the platform asks us to stop.
  *
