@@ -157,6 +157,12 @@ const agentRunSchema = new mongoose.Schema(
     // When an operator claimed this approval.
     claimedAt: Date,
 
+    // When the expiry sweep gave up on an unanswered approval. Kept as its own
+    // field rather than reusing completedAt, because "nobody answered" and
+    // "the agent finished" are different outcomes and an audit trail should
+    // not blur them.
+    expiredAt: Date,
+
     // The execution plan, if this request was classified as multi-step.
     // Persisted because the assignment requires plans and their revisions to
     // be inspectable afterwards.

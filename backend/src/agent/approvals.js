@@ -176,7 +176,55 @@ async function expireStale() {
     createdAt: { $lt: cutoff },
   }).lean();
 
+  if (stale.length === 0) return [];
+
+  // ---- ACTUALLY EXPIRE THEM ---------------------------------------------
+  //
+  // The first version of this function only FOUND stale runs and returned
+  // them, trusting a caller to finish the job. Nothing ever called it. So 50
+  // approvals piled up over five days, the oldest 120 hours old, and the UI
+  // showed a permanent red "50" badge.
+  //
+  // Two lessons in one bug:
+  //
+  //   1. A function named `expireStale` that does not expire anything is a
+  //      trap. Name it for what it does, or make it do what it is named.
+  //   2. Dead code is not harmless. This was written, exported, documented -
+  //      and never wired up. Nobody noticed, because nothing failed loudly.
+  //
+  // The status filter is part of the update, not just the query, so a run
+  // approved in the moment between the find and the update is not clobbered.
+  const ids = stale.map((r) => r.runId);
+  const result = await AgentRun.updateMany(
+    { runId: { $in: ids }, status: "awaiting_confirmation" },
+    { $set: { status: "expired", expiredAt: new Date() } }
+  );
+
+  console.log(
+    `[approvals] expired ${result.modifiedCount} approval(s) older than ` +
+      `${Math.round(APPROVAL_TTL_MS / 3600000)}h`
+  );
+
   return stale;
+}
+
+/**
+ * Run the sweep on a timer.
+ *
+ * Called once at server start. An approval nobody answers is a customer
+ * waiting forever - and a queue that only grows is a queue an operator stops
+ * reading, which defeats the point of having one.
+ */
+function startExpirySweep(intervalMs = 15 * 60 * 1000) {
+  const tick = () =>
+    expireStale().catch((err) =>
+      console.error("[approvals] expiry sweep failed:", err.message)
+    );
+
+  tick(); // once at boot, so a restart clears anything left over
+  const timer = setInterval(tick, intervalMs);
+  timer.unref?.(); // never keep the process alive just for this
+  return timer;
 }
 
 module.exports = {
@@ -185,5 +233,6 @@ module.exports = {
   claimRun,
   releaseRun,
   expireStale,
+  startExpirySweep,
   APPROVAL_TTL_MS,
 };
