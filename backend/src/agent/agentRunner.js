@@ -688,7 +688,7 @@ async function runAgent(userMessage, options = {}) {
         reason: options.routeReason ?? "Delegated by the coordinator.",
         stage: "coordinator",
       }
-    : await routeRequest(userMessage);
+    : await routeRequest(userMessage, { history });
 
   if (onEvent) {
     onEvent({
