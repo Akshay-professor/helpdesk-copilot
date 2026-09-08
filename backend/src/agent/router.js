@@ -183,6 +183,11 @@ const GUIDED_CATEGORIES = [
  * question?" would cost more than the refusal it produces. And the cheap check
  * runs FIRST, so the common cases never reach a paid path.
  */
+const PLEASANTRIES = new Set([
+  "hi", "hey", "hello", "yo", "thanks", "thank you", "thx", "ok", "okay",
+  "sure", "yes", "no", "bye", "goodbye", "cheers", "hi there", "hey there",
+]);
+
 const OUT_OF_SCOPE = [
   {
     name: "general_knowledge",
@@ -344,7 +349,81 @@ function routeByPattern(message) {
  *
  * @returns {Promise<{route, category?, tools?, params?, reason, stage}>}
  */
-async function routeRequest(message) {
+async function routeRequest(message, options = {}) {
+  const history = options.history ?? [];
+
+  // ---- Stage 0: ARE WE MID-CONVERSATION? --------------------------------
+  //
+  // THE BUG THIS FIXES, which was mine and was bad:
+  //
+  //     user:  check my orders
+  //     agent: Could you let me know the email address you use?
+  //     user:  alice@shop.com
+  //     agent: Hello! I can help with your orders...      <- LOOP
+  //
+  // The SOCIAL route classified alice@shop.com as someone introducing
+  // themselves - which, read in isolation, it is. But it was not in
+  // isolation. It was an ANSWER to a question the agent had just asked, and
+  // routing threw it away and greeted the customer again. Forever.
+  //
+  // The router was judging every message as if it were the first one.
+  //
+  // So: if the last thing the agent did was ask a question, the next message
+  // is an answer. It goes to the agent, which has the context to use it. No
+  // template can, because the template does not know what was asked.
+  const lastAssistant = [...history].reverse().find((m) => m.role === "assistant");
+  // A question ANYWHERE in the reply counts, not just at the end.
+  //
+  // The first version tested endsWith("?") and missed the most common shape
+  // an agent actually produces:
+  //
+  //   "Could you provide the email linked to your account? Once I have
+  //    that, I can look up your orders."
+  //
+  // The question is in the middle; the reply ends on a full stop. So the
+  // guard never fired and the loop survived the fix meant to kill it.
+  //
+  // Also catch the polite imperative - "please provide your email" - which
+  // is a request for information with no question mark at all.
+  const lastText =
+    typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
+
+  const agentAsked =
+    lastText.includes("?") ||
+    /(please (provide|share|confirm|let me know|tell me)|could you (please )?(provide|share|confirm)|what('s| is) your|i('ll| will) need your)/i.test(
+      lastText
+    );
+
+  // ...unless the message is CLEARLY still just conversation. A greeting or a
+  // thank-you after a question is not an answer to it, and sending those to
+  // the agent invites it to invent the answer it was waiting for - which it
+  // did, hallucinating "alice@example.com" from the message "My name is
+  // alice".
+  //
+  // Only real content continues the conversation. Pleasantries do not.
+  // A SET, not a regex.
+  //
+  // This is the SECOND time in this file that a backslash-b became a literal
+  // backspace character (0x08) while being written through a shell, leaving a
+  // pattern that read perfectly on screen and matched nothing at runtime.
+  // A fixed list of words needs no pattern, so it cannot have that bug.
+  const trimmed = String(message || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/, "");
+
+  const isPleasantry = PLEASANTRIES.has(trimmed);
+
+  if (agentAsked && !isPleasantry) {
+    return {
+      route: ROUTES.AUTONOMOUS,
+      reason:
+        "The agent asked a question on the previous turn, so this message is " +
+        "an answer - it needs the conversation, not a template.",
+      stage: "continuation",
+    };
+  }
+
   // ---- Stage 1 -----------------------------------------------------------
   const byPattern = routeByPattern(message);
   if (byPattern) return { ...byPattern, stage: byPattern.stage ?? "pattern" };
