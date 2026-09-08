@@ -368,6 +368,26 @@ async function routeRequest(message) {
     // Two layers, cheapest first. The regex is free and instant and works when
     // Groq is down; the classifier is ~600ms and catches everything else. A
     // request has to get past BOTH to reach an agent.
+    // ---- SOCIAL: ordinary conversation ---------------------------------
+    //
+    // Greetings, names, thanks, "are you there?". These are how a real support
+    // conversation begins, and they were being REFUSED - a customer typing
+    // "Hey" was told "I only handle questions about this store".
+    //
+    // They get a template, not an agent: zero tokens, instant, and warm. There
+    // is no judgement in answering "hello", so paying a model to do it would
+    // be the same mistake the whole routing layer exists to avoid.
+    if (intent && intent.route === "social") {
+      return {
+        route: ROUTES.WORKFLOW,
+        workflow: "social",
+        params: { rawMessage: message },
+        reason: `Conversational opener (${intent.latencyMs}ms) - answered from a template, 0 tokens.`,
+        stage: "classifier",
+        classifier: { label: intent.label, latencyMs: intent.latencyMs, tokens: intent.tokens },
+      };
+    }
+
     if (intent && intent.route === "out_of_scope") {
       return {
         route: ROUTES.WORKFLOW,
@@ -464,6 +484,52 @@ async function runWorkflow(workflow, params, ctx = {}) {
       handled: true,
       data: { orderId: order.id, status: order.status },
     };
+  }
+
+  if (workflow === "social") {
+    const text = String(params.rawMessage ?? "").toLowerCase();
+
+    // Match the register of what they said. Answering "thanks" with "Hello!"
+    // is the kind of small wrongness that makes a bot feel like a bot.
+    // Match the register of what they said. Answering "thanks" with "Hello!"
+    // is the kind of small wrongness that makes a bot feel like a bot.
+    //
+    // Plain string matching rather than regex, deliberately. These are short
+    // fixed phrases with no structure to match, so a regex buys nothing - and
+    // the first attempt here shipped a pattern containing a literal BACKSPACE
+    // character (0x08) instead of the two-character escape , because the
+    // backslash was eaten passing through shell -> script -> file. It read
+    // perfectly on screen and matched nothing at runtime.
+    //
+    // Every layer of quoting is a chance to silently change what you wrote.
+    const has = (...words) => words.some((w) => text.includes(w));
+
+    const isThanks = has("thanks", "thank you", "thx", "cheers", "appreciate");
+    const isBye = has("bye", "goodbye", "see you", "nothing else");
+    const isName = has("i am ", "i'm ", "my name is", "this is ");
+    const isFrustrated = has(
+      "what's the problem",
+      "whats the problem",
+      "why won't you",
+      "why wont you",
+      "not helping",
+      "useless"
+    );
+
+    const reply = isThanks
+      ? "You're very welcome. Anything else I can help with?"
+      : isBye
+      ? "Thanks for getting in touch. Have a good day!"
+      : isFrustrated
+      ? "Sorry about that - you're right, that was unhelpful. I can look up " +
+        "your orders, invoices and refunds. What can I help you with?"
+      : isName
+      ? "Nice to meet you! I can help with orders, invoices, refunds and our " +
+        "policies. What can I do for you?"
+      : "Hello! I'm HelpDesk Copilot. I can help with your orders, invoices, " +
+        "refunds and account questions. What can I do for you?";
+
+    return { reply, handled: true, data: { social: true } };
   }
 
   if (workflow === "out_of_scope") {
