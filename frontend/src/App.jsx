@@ -203,13 +203,33 @@ export default function App() {
         <span className="pill">{stats.tokensUsed.toLocaleString()} tokens</span>
       </div>
 
-      {view === "voice" ? (
-        <VoiceCall />
-      ) : view === "queue" ? (
+      {/*
+        HIDE, DO NOT UNMOUNT.
+
+        These were conditionally rendered, which means React DESTROYED the
+        component whenever you switched tabs - and every piece of state inside
+        it went with it. Switch away from Voice mid-call and you hung up:
+        the WebSocket closed, the transcript vanished, the microphone stopped.
+
+        Chat survived only by accident, because its state happens to live up
+        here in App rather than in a child.
+
+        `hidden` keeps the component mounted and its state alive while removing
+        it from view (index.css sets [hidden] { display: none }). The cost is
+        that a hidden tab keeps polling; the benefit is that a phone call does
+        not end because you glanced at the approvals queue.
+      */}
+      <div hidden={view !== "voice"} className="tabpanel">
+        <VoiceCall active={view === "voice"} />
+      </div>
+      <div hidden={view !== "queue"} className="tabpanel">
         <OperatorQueue />
-      ) : view === "costs" ? (
+      </div>
+      <div hidden={view !== "costs"} className="tabpanel">
         <CostDashboard />
-      ) : (
+      </div>
+
+      <div hidden={view !== "chat"} className="tabpanel">
       <div className="body">
         <div className="chat-pane">
           <div className="messages" ref={scrollRef}>
@@ -262,7 +282,7 @@ export default function App() {
           />
         </div>
       </div>
-      )}
+      </div>
 
       <ConfirmModal
         confirmation={pending?.confirmation}

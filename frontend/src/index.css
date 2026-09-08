@@ -434,3 +434,8 @@ h3.section {
   border: 1px solid var(--border); background: var(--bg);
   color: var(--text); font: inherit;
 }
+
+/* Tab panels stay MOUNTED and are hidden, so switching tabs never destroys
+   a live call or a half-typed message. */
+.tabpanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tabpanel[hidden] { display: none; }

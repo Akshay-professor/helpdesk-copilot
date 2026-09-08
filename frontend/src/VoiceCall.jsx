@@ -65,7 +65,7 @@ function useSpeaker() {
   return { speak, stop, isSpeaking: () => Boolean(currentRef.current) };
 }
 
-export default function VoiceCall() {
+export default function VoiceCall({ active = true }) {
   const [status, setStatus] = useState("idle"); // idle|connecting|live|ended
   const [turns, setTurns] = useState([]);
   const [activity, setActivity] = useState([]);
@@ -108,7 +108,33 @@ export default function VoiceCall() {
     setStatus("ended");
   }, [stop]);
 
+  // Tear the call down only when the component really goes away - NOT when the
+  // tab is merely hidden. That distinction is the whole point of keeping the
+  // panel mounted: switching to Approvals mid-call must not hang up.
   useEffect(() => () => hangUp(), [hangUp]);
+
+  // The waveform is a 60fps render loop. While the tab is hidden nobody can
+  // see it, so pause it and resume on return. The CALL keeps running; only the
+  // animation stops.
+  useEffect(() => {
+    if (!active) {
+      cancelAnimationFrame(rafRef.current);
+      return;
+    }
+    if (!analyserRef.current) return;
+
+    const analyser = analyserRef.current;
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+      setLevel(Math.min(1, peak / 60));
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [active, status]);
 
   // ---- the call ---------------------------------------------------------
   async function startCall() {

@@ -41,7 +41,21 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 // than assumed. The first attempt hard-coded "llama-3.3-70b-versatile", which
 // this account cannot access - a 404 that looked exactly like the fallback
 // "not working". Ask the provider what it has; do not guess from memory.
-const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-120b";
+//
+// A CHAIN, not a single model. Groq's rate limits are PER MODEL, not per
+// account - measured directly: gpt-oss-120b returned 429 while gpt-oss-20b
+// and compound-mini both returned 200 on the same key, in the same second.
+//
+// So one exhausted model is not an exhausted provider, and treating it as one
+// throws away capacity that is sitting right there. Ordered strongest first;
+// we drop down only as each is exhausted.
+const GROQ_FALLBACK_MODELS = (
+  process.env.GROQ_FALLBACK_MODELS ||
+  "openai/gpt-oss-120b,openai/gpt-oss-20b,groq/compound-mini"
+)
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
 
 /** Is a second provider available to fall back to? */
 function hasFallback() {
@@ -223,30 +237,40 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
   if (!response?.ok && hasFallback()) {
     console.warn(
       `[llm] Mistral unavailable (${lastError?.message?.slice(0, 60)}…) — ` +
-        `falling back to Groq ${GROQ_FALLBACK_MODEL}`
+        `falling back to Groq (${GROQ_FALLBACK_MODELS.length} models)`
     );
 
+    let fb;
     try {
-      const fb = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        },
-        // Same body, different model. The dialect is identical.
-        body: JSON.stringify({ ...body, model: GROQ_FALLBACK_MODEL }),
-      });
+      // Walk the chain. Each 429 means "this model is spent", not "give up".
+      for (const model of GROQ_FALLBACK_MODELS) {
+        fb = await fetch(GROQ_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          },
+          // Same body, different model. The dialect is identical.
+          body: JSON.stringify({ ...body, model }),
+        });
 
-      if (fb.ok) {
-        const data = await fb.json();
-        const message = data.choices?.[0]?.message;
-        if (message) {
-          message._usage = data.usage ?? {};
-          // Mark it, so a trace shows WHICH provider answered. A silent
-          // fallback is a system that lies about its own behaviour.
-          message._provider = "groq";
-          return message;
+        if (fb.ok) {
+          const data = await fb.json();
+          const message = data.choices?.[0]?.message;
+          if (message) {
+            message._usage = data.usage ?? {};
+            // Mark it, so a trace shows WHICH provider answered. A silent
+            // fallback is a system that lies about its own behaviour.
+            message._provider = `groq:${model}`;
+            return message;
+          }
         }
+
+        // Only a 429 is worth trying the next model for. A 400 means the
+        // request itself is malformed, and it will be just as malformed at
+        // the next model - move on rather than burning the whole chain.
+        if (fb.status !== 429) break;
+        console.warn(`[llm] ${model} rate limited, trying the next model`);
       }
       // Report the FALLBACK's failure, not the primary's stale one.
       //
