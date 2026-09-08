@@ -540,11 +540,28 @@ const TOOLS = {
         });
       }
 
-      if (decision.tier === TIER.NEEDS_APPROVAL) {
-        // Build 1 has no approval queue, so this is a structured refusal that
-        // tells the agent what to do instead. Build 2 replaces this branch
-        // with a genuine pause - the boundary does not move, only the
-        // behaviour at it.
+      if (decision.tier === TIER.NEEDS_APPROVAL && !ctx.approved) {
+        // ---- THE BUG THIS GUARD FIXES ---------------------------------
+        //
+        // The `!ctx.approved` half was missing, and the comment here used to
+        // promise that "Build 2 replaces this branch with a genuine pause".
+        // Build 2 never did. So the two layers disagreed:
+        //
+        //   agentRunner  pauses BEFORE the tool runs, gets human approval,
+        //                then calls the tool
+        //   this tool    refuses anyway, because it had no idea a human had
+        //                just said yes
+        //
+        // The customer saw: confirmation modal -> Approve -> "I've escalated
+        // this to a human agent". An approval that leads to being told you
+        // need an approval.
+        //
+        // ctx.approved is set only by resumeAgent, only after a real human
+        // decision has been recorded. It is not something the model can ask
+        // for - the model has no way to put it in ctx.
+        //
+        // The ceiling above (TIER.REFUSE) is deliberately NOT relaxed by this
+        // flag. Approval changes WHO asked; it never changes WHAT IS ALLOWED.
         return toolError("approval_required", decision.reason, {
           requestedAmount: amount,
           autoApproveLimit: decision.limit,
@@ -675,7 +692,9 @@ const TOOLS = {
         });
       }
 
-      if (decision.tier === TIER.NEEDS_APPROVAL) {
+      // Same fix as issueRefund above: a human has already approved this by
+      // the time the tool runs, so refusing again would strand the customer.
+      if (decision.tier === TIER.NEEDS_APPROVAL && !ctx.approved) {
         return toolError("approval_required", decision.reason, {
           requestedAmount: amount,
           autoApproveLimit: decision.limit,

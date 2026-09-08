@@ -51,7 +51,15 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 // we drop down only as each is exhausted.
 const GROQ_FALLBACK_MODELS = (
   process.env.GROQ_FALLBACK_MODELS ||
-  "openai/gpt-oss-120b,openai/gpt-oss-20b,groq/compound-mini"
+  // Both verified to support TOOL CALLING, which the agent loop requires.
+  //
+  // groq/compound-mini was in this list and had to come out: it answers plain
+  // chat fine but returns 400 "`tool calling` is not supported with this
+  // model" for every agent request. A fallback that cannot do the job is not a
+  // fallback - it is a slower way to fail.
+  //
+  // Test a candidate WITH a tools array before adding it, not with "hi".
+  "openai/gpt-oss-120b,openai/gpt-oss-20b"
 )
   .split(",")
   .map((m) => m.trim())
@@ -266,11 +274,26 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
           }
         }
 
-        // Only a 429 is worth trying the next model for. A 400 means the
-        // request itself is malformed, and it will be just as malformed at
-        // the next model - move on rather than burning the whole chain.
-        if (fb.status !== 429) break;
-        console.warn(`[llm] ${model} rate limited, trying the next model`);
+        // Which failures are worth trying the next model for?
+        //
+        //   429  yes - this model is spent, another may not be
+        //   400  yes IF it is a capability gap ("tool calling is not
+        //        supported"), because a different model may support it.
+        //        Otherwise no: a malformed request stays malformed.
+        //   else no - stop and report.
+        // NOT `body` - that name is already the request body in this scope,
+        // and shadowing it threw "Cannot access 'body' before initialization"
+        // on the very first call.
+        const errBody = await fb.clone().text().catch(() => "");
+        const capabilityGap =
+          fb.status === 400 && /not supported|does not support/i.test(errBody);
+
+        if (fb.status !== 429 && !capabilityGap) break;
+
+        console.warn(
+          `[llm] ${model} ${capabilityGap ? "lacks a needed capability" : "rate limited"}` +
+            `, trying the next model`
+        );
       }
       // Report the FALLBACK's failure, not the primary's stale one.
       //
