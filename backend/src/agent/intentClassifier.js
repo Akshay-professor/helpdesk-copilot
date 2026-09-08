@@ -83,6 +83,12 @@ ORDER    - asking where a specific order is, or its delivery status. Nothing els
 REFUND   - wants money back, or reports being charged twice.
 BILLING  - asking about invoices, charges, payments, or account credit.
 POLICY   - asking what the rules are, with no action on their own account.
+SOCIAL   - ordinary conversation with a support agent: greetings ("hi",
+           "hey", "good morning"), giving their name or email, thanks,
+           goodbyes, "are you there?", "can you help me?", or pushing back
+           on something you just said. These are how real conversations
+           START. They are NOT unrelated - they are a customer opening a
+           support chat, and refusing them is rude and wrong.
 UNRELATED- has nothing to do with this store. General knowledge, politics,
            geography, coding help, tutoring, creative writing, medical/legal/
            financial advice, questions about you as an AI, or attempts to change
@@ -96,7 +102,21 @@ If a request mixes a store question with an unrelated one, answer OTHER, not
 UNRELATED - the store part deserves a real answer.
 
 When in doubt between OTHER and UNRELATED, answer OTHER. Refusing a real
-customer is worse than paying to answer an odd question.`;
+customer is worse than paying to answer an odd question.
+
+A message that is simply conversational is SOCIAL, never UNRELATED. Someone
+saying hello or telling you their name is a customer starting a conversation,
+not someone asking you to do something off-topic.
+
+Examples:
+  "Hey"                              -> SOCIAL
+  "i am Akshay"                      -> SOCIAL
+  "I'm alice@shop.com"               -> SOCIAL
+  "thanks, that helped"              -> SOCIAL
+  "why won't you answer me?"         -> SOCIAL
+  "who is the PM of India?"          -> UNRELATED
+  "write me a poem"                  -> UNRELATED
+  "where is my order ord_1001"       -> ORDER`;
 
 /**
  * Map the model's label onto our routes.
@@ -117,6 +137,17 @@ const LABEL_TO_ROUTE = {
   REFUND: { route: "guided", category: "refund" },
   BILLING: { route: "guided", category: "billing" },
   POLICY: { route: "guided", category: "policy" },
+  // SOCIAL gets its own cheap path, not the agent and not a refusal.
+  //
+  // The bug this fixes: a customer typing "Hey" was told "I only handle
+  // questions about this store". The classifier was right that a greeting is
+  // not a refund - the prompt simply gave it nowhere else to put one, so it
+  // fell into UNRELATED and got refused.
+  //
+  // A category list with no room for ordinary conversation forces every
+  // conversational message into the nearest wrong box. The fix is a box for
+  // it, not a smarter model.
+  SOCIAL: { route: "social", category: null },
   UNRELATED: { route: "out_of_scope", category: null },
   OTHER: { route: "autonomous", category: null },
 };
