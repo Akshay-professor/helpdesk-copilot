@@ -472,6 +472,61 @@ app.get("/runs/:runId", async (req, res) => {
  * the guards already stand, they simply start reading a badge that cannot be
  * forged.
  */
+/**
+ * Clean conversation history arriving from a client.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS
+ * ---------------------------------------------------------------------------
+ *
+ * The server is stateless: it returns `history`, the browser holds it, and
+ * sends it back on the next turn. That is what lets the backend restart
+ * mid-conversation without losing anything.
+ *
+ * But it also means **the conversation is client-supplied data**, and we were
+ * forwarding it to the provider untouched. Two consequences, one cosmetic and
+ * one not:
+ *
+ *   1. THE BUG. llmClient attaches `_usage` and `_provider` as our own
+ *      metadata. runLoop strips them before pushing to `messages` - but the
+ *      copy that went out in the HTTP response still carried them. The browser
+ *      stored that copy and sent it back, and Mistral rejected the whole
+ *      request:
+ *
+ *          422 extra_forbidden  body.messages[2].assistant._provider
+ *
+ *      A conversation would work for one or two turns and then break
+ *      permanently, which reads exactly like a flaky backend.
+ *
+ *   2. THE TRUST PROBLEM. Anything a client sends here reaches the model. A
+ *      forged history could claim a refund was already approved, or carry a
+ *      role the provider does not accept. Keeping only known fields and known
+ *      roles is cheap; discovering you needed it is not.
+ *
+ * So: allow-list, not deny-list. Keep the fields the API defines and drop
+ * everything else, rather than naming the fields we happen to know are bad -
+ * that list is always one release out of date.
+ */
+const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
+const ALLOWED_KEYS = ["role", "content", "tool_calls", "tool_call_id", "name"];
+
+function sanitizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  return history
+    .filter((m) => m && typeof m === "object" && ALLOWED_ROLES.has(m.role))
+    .map((m) => {
+      const clean = {};
+      for (const k of ALLOWED_KEYS) {
+        if (m[k] !== undefined) clean[k] = m[k];
+      }
+      return clean;
+    })
+    // A cap, because history arrives from the client and an unbounded array is
+    // an unbounded bill. The newest turns are the ones that matter.
+    .slice(-40);
+}
+
 function callerFrom(req) {
   const id = req.get("x-caller-id");
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
@@ -504,7 +559,8 @@ async function rateLimited(req, res) {
 }
 
 app.post("/chat", async (req, res) => {
-  const { message, history } = req.body ?? {};
+  const { message } = req.body ?? {};
+  const history = sanitizeHistory(req.body?.history);
 
   // Validate at the boundary. Anything past this point can assume its inputs
   // are the right shape, which is what keeps the code underneath readable.
@@ -645,7 +701,8 @@ app.post("/chat/confirm", async (req, res) => {
  * unidirectional problem.
  */
 app.post("/chat/stream", async (req, res) => {
-  const { message, history } = req.body ?? {};
+  const { message } = req.body ?? {};
+  const history = sanitizeHistory(req.body?.history);
 
   if (typeof message !== "string" || message.trim() === "") {
     return res.status(400).json({
