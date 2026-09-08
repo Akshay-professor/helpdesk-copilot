@@ -890,6 +890,19 @@ async function resumeAgent(state, approved, options = {}) {
       runId: state.runId,
       callerId: state.callerId,
       kbCategories: state.kbCategories ?? null,
+      // THE APPROVAL BADGE.
+      //
+      // Set here and ONLY here - on the one tool call a human actually
+      // approved, on the path that can only be reached by resumeAgent(true).
+      // The model cannot request it; it has no way to write into ctx.
+      //
+      // Without this, the tool re-applies its own approval check to a call
+      // that has already been approved, and the customer is told they need an
+      // approval they just gave.
+      //
+      // Note what it does NOT do: the hard ceiling (TIER.REFUSE) ignores this
+      // flag entirely. Approval changes who asked, never what is allowed.
+      approved: true,
     });
 
     entry.toolCalls.push({
