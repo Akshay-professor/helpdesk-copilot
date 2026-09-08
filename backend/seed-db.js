@@ -19,6 +19,7 @@ const {
   Invoice,
   Refund,
   Escalation,
+  AgentRun,
 } = require("./src/db/models");
 const seed = require("./src/data/seed");
 
@@ -53,6 +54,32 @@ async function main() {
   console.log(`  invoices  : ${await Invoice.countDocuments()}`);
   console.log(`  refunds   : ${await Refund.countDocuments()} (starts empty)`);
   console.log(`  escalations: ${await Escalation.countDocuments()} (starts empty)`);
+
+  // ---- ABANDONED APPROVALS ----------------------------------------------
+  //
+  // Run history is deliberately preserved (see the note at the top) - it is
+  // the observability we built and wiping it every reset would throw that
+  // away.
+  //
+  // But a run left in `awaiting_confirmation` is not history, it is an OPEN
+  // TASK. Test suites deliberately pause on $2,400 refunds to prove the
+  // policy works, and never approve them - so every safety run left two more
+  // items sitting in the operator's queue, referring to business data this
+  // very script just deleted.
+  //
+  // The queue is a to-do list for a human. A to-do list that fills with items
+  // nobody can action is one an operator stops reading, and then a real
+  // approval waits just as long as if there were no queue at all.
+  const abandoned = await AgentRun.updateMany(
+    { status: "awaiting_confirmation" },
+    { $set: { status: "expired", expiredAt: new Date() } }
+  );
+  if (abandoned.modifiedCount > 0) {
+    console.log(
+      `  approvals : ${abandoned.modifiedCount} abandoned one(s) expired ` +
+        `(they pointed at data this reset just replaced)`
+    );
+  }
 
   // Prove the duplicate-charge fixture survived, since the assignment's worked
   // example depends on it.
