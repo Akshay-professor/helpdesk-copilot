@@ -1,0 +1,63 @@
+# CI — run the checks that do not need an LLM on every push.
+#
+# WHY THIS SPLIT MATTERS
+#
+# Most of this project's test suites call a real model, so they need API keys
+# and they fail when a free tier hits its daily quota. A pipeline that goes red
+# because somebody else's rate limit reset is a pipeline people learn to
+# ignore, and an ignored pipeline is worse than none.
+#
+# So CI runs only what is DETERMINISTIC:
+#
+#   - the frontend builds
+#   - the router matrix's pattern-only rows (no classifier, no agent)
+#   - policy limits, which are pure functions
+#
+# The model-dependent suites stay a local `npm test`, run before a demo.
+# Honest about what is verified automatically and what is not.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ---- frontend actually compiles ---------------------------------
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # ---- backend loads, and its pure logic is correct ---------------
+      - name: Install backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Every module parses
+        working-directory: backend
+        run: |
+          for f in $(find src -name '*.js'); do
+            node --check "$f"
+          done
+
+      - name: Policy limits (pure functions, no LLM, no database)
+        working-directory: backend
+        run: node test-policy-unit.js
+
+      - name: Routing patterns (regex stage only, no classifier)
+        working-directory: backend
+        run: node test-router-patterns.js

@@ -14,7 +14,9 @@
     "test:confirm": "node test-confirm.js",
     "test:db": "node test-db.js",
     "test:stream": "node test-stream.js",
-    "test:rag": "node test-rag.js"
+    "test:rag": "node test-rag.js",
+    "test": "node seed-db.js && node test-router-matrix.js && node test-scope.js && node test-authz.js && node test-safety.js && node test-reflection.js && node test-hitl.js",
+    "test:fast": "node test-router-matrix.js && node test-scope.js && node test-authz.js"
   },
   "keywords": [
     "agentic-ai",
