@@ -59,7 +59,23 @@ const GROQ_FALLBACK_MODELS = (
   // fallback - it is a slower way to fail.
   //
   // Test a candidate WITH a tools array before adding it, not with "hi".
-  "openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b"
+  // qwen/qwen3.8-27b was here and had to come out. It answers "hi" fine, which
+  // is exactly how it got added - I tested a candidate with a trivial payload.
+  // Given a REAL agent request (system prompt + history + 9 tool definitions)
+  // it returns:
+  //
+  //     429 "Request too large for model qwen/qwen3.8-27b"
+  //
+  // A 429 that means "your context is too big" is indistinguishable, by status
+  // code alone, from one that means "you are out of quota" - so the chain
+  // dutifully moved on, exhausted itself, and the customer got a 502 after
+  // nineteen seconds.
+  //
+  // TEST A FALLBACK WITH THE WORK IT WILL ACTUALLY BE ASKED TO DO. This is the
+  // second time that rule has been learned here: compound-mini was dropped for
+  // the same class of reason (no tool calling), also found only after it
+  // shipped.
+  "openai/gpt-oss-120b,openai/gpt-oss-20b"
 )
   .split(",")
   .map((m) => m.trim())
@@ -287,6 +303,27 @@ async function callLLM({ messages, tools, model = DEFAULT_MODEL }) {
         const errBody = await fb.clone().text().catch(() => "");
         const capabilityGap =
           fb.status === 400 && /not supported|does not support/i.test(errBody);
+
+        // A 429 does not always mean "out of quota".
+        //
+        // Groq returns 429 for BOTH "you have used your quota" and "this
+        // request is too large for this model" - two completely different
+        // problems behind one status code. The first is worth trying another
+        // model for; the second is not, because the next model in the chain is
+        // SMALLER and will fail harder.
+        //
+        // Reading the status alone, the chain walked its whole list on a
+        // request that no smaller model could ever have served, then gave the
+        // customer a 502 after nineteen seconds of trying.
+        const tooLarge = /too large|context length|maximum context/i.test(errBody);
+
+        if (tooLarge) {
+          console.warn(
+            `[llm] ${model} rejected the request as too large - a smaller ` +
+              `model will not help, so not walking the chain`
+          );
+          break;
+        }
 
         if (fb.status !== 429 && !capabilityGap) break;
 

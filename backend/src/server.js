@@ -531,6 +531,38 @@ function sanitizeHistory(history) {
     .slice(-40);
 }
 
+/**
+ * Turn an internal failure into something true for the customer.
+ *
+ * The old message was always "The agent could not complete this request.
+ * Please try again." - and the commonest cause by far is an exhausted API
+ * quota, where retrying is GUARANTEED to fail. So the system invited the
+ * customer to waste their time, repeatedly, while hiding the one fact that
+ * would have explained the failure.
+ *
+ * An error message that suggests a useless action is worse than one that
+ * admits defeat: it wastes the reader's time AND hides the real problem from
+ * whoever has to fix it.
+ *
+ * Note what does NOT cross this boundary: the upstream error text. It can
+ * carry model names, org ids and internal details, so we match on it and
+ * return our own words rather than echoing it.
+ */
+function describeFailure(err) {
+  const msg = String(err?.message ?? "");
+
+  if (/429|rate limit|quota/i.test(msg)) {
+    return (
+      "Our AI service has reached its usage limit for now, so I can't process " +
+      "this request. Please try again later, or contact support by email."
+    );
+  }
+  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network|timeout/i.test(msg)) {
+    return "I can't reach our systems at the moment. Please try again shortly.";
+  }
+  return "The agent could not complete this request. Please try again.";
+}
+
 function callerFrom(req) {
   const id = req.get("x-caller-id");
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
@@ -602,7 +634,7 @@ app.post("/chat", async (req, res) => {
 
     res.status(502).json({
       error: "agent_error",
-      message: "The agent could not complete this request. Please try again.",
+      message: describeFailure(err),
     });
   }
 });
@@ -778,7 +810,10 @@ app.post("/chat/stream", async (req, res) => {
     send({
       type: "error",
       error: "agent_error",
-      message: "The agent could not complete this request.",
+      // Same honest message as /chat. This is the endpoint the browser
+      // actually uses, so a fix applied only to /chat would have been
+      // invisible to every real user.
+      message: describeFailure(err),
     });
   } finally {
     if (!clientGone) res.end();
