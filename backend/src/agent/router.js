@@ -48,17 +48,23 @@
  */
 
 const repo = require("../data/repository");
+const { ROUTES, WORKFLOWS } = require("../constants");
 const { classifyIntent, isConfigured } = require("./intentClassifier");
 
 // ---------------------------------------------------------------------------
 // Route definitions
 // ---------------------------------------------------------------------------
 
-const ROUTES = {
-  WORKFLOW: "workflow",
-  GUIDED: "guided",
-  AUTONOMOUS: "autonomous",
-};
+// Imported, not redefined.
+//
+// This file used to declare its own ROUTES with three entries while
+// constants.js declared five. Nothing broke, because the two names the router
+// lacked - SPECIALIST and MULTI_AGENT - are written by the coordinator, which
+// reads the other copy.
+//
+// That is what drift looks like before it becomes a bug: two definitions of
+// one idea, already disagreeing, waiting for the day somebody reads the wrong
+// one. Re-exported below so existing importers of this module keep working.
 
 /**
  * Which tools each guided category is allowed to touch.
@@ -103,15 +109,15 @@ const GUIDED_TOOLSETS = {
  * the model to work out WHAT to look up, it is not a workflow - it only
  * qualifies when the answer is a lookup and a sentence.
  */
-const WORKFLOWS = [
+const WORKFLOW_PATTERNS = [
   {
-    name: "order_status",
+    name: WORKFLOWS.ORDER_STATUS,
     // "where is order ord_1001", "status of ord_1001", "track ord_1001"
     match: /\b(?:where\s+is|status\s+of|track(?:ing)?(?:\s+for)?)\b[^]*?\b(ord_\d+)\b/i,
     extract: (m) => ({ orderId: m[1] }),
   },
   {
-    name: "order_status_bare",
+    name: WORKFLOWS.ORDER_STATUS_BARE,
     // just an order id and a question mark - "ord_1001?"
     match: /^\s*(ord_\d+)\s*\??\s*$/i,
     extract: (m) => ({ orderId: m[1] }),
@@ -273,7 +279,7 @@ function routeByPattern(message) {
     if (oos.match.test(text)) {
       return {
         route: ROUTES.WORKFLOW,
-        workflow: "out_of_scope",
+        workflow: WORKFLOWS.OUT_OF_SCOPE,
         params: { category: oos.name, rawMessage: text },
         reason: `Out of scope (${oos.name}) - refused without an LLM call.`,
       };
@@ -281,7 +287,7 @@ function routeByPattern(message) {
   }
 
   // ---- 1. Deterministic workflow -----------------------------------------
-  for (const wf of WORKFLOWS) {
+  for (const wf of WORKFLOW_PATTERNS) {
     const m = text.match(wf.match);
     if (m) {
       return {
@@ -395,7 +401,7 @@ async function routeRequest(message, options = {}) {
     {
       name: "scope-pattern",
       run: () =>
-        patterns?.workflow === "out_of_scope"
+        patterns?.workflow === WORKFLOWS.OUT_OF_SCOPE
           ? { ...patterns, stage: "pattern" }
           : null,
     },
@@ -407,7 +413,7 @@ async function routeRequest(message, options = {}) {
       // message - including one that arrives mid-conversation.
       run: async () => {
         const i = await intent();
-        return i?.route === "out_of_scope"
+        return i?.route === WORKFLOWS.OUT_OF_SCOPE
           ? refusal(message, i)
           : null;
       },
@@ -444,10 +450,10 @@ async function routeRequest(message, options = {}) {
         const i = await intent();
         if (!i) return null;
 
-        if (i.route === "social") {
+        if (i.route === WORKFLOWS.SOCIAL) {
           return {
             route: ROUTES.WORKFLOW,
-            workflow: "social",
+            workflow: WORKFLOWS.SOCIAL,
             params: { rawMessage: message },
             reason: `Conversational opener (${i.latencyMs}ms) - template, 0 tokens.`,
             stage: "classifier",
@@ -500,7 +506,7 @@ async function routeRequest(message, options = {}) {
 function refusal(message, intent) {
   return {
     route: ROUTES.WORKFLOW,
-    workflow: "out_of_scope",
+    workflow: WORKFLOWS.OUT_OF_SCOPE,
     params: { category: "classifier", rawMessage: message },
     reason: `Classified as ${intent.label} in ${intent.latencyMs}ms - refused before any agent ran.`,
     stage: "classifier",
@@ -562,7 +568,7 @@ function isAnswerToAQuestion(message, history) {
  * optimisation.
  */
 async function runWorkflow(workflow, params, ctx = {}) {
-  if (workflow === "order_status" || workflow === "order_status_bare") {
+  if (workflow === WORKFLOWS.ORDER_STATUS || workflow === WORKFLOWS.ORDER_STATUS_BARE) {
     const order = await repo.findOrderById(params.orderId);
 
     if (!order) {
@@ -598,7 +604,7 @@ async function runWorkflow(workflow, params, ctx = {}) {
     };
   }
 
-  if (workflow === "social") {
+  if (workflow === WORKFLOWS.SOCIAL) {
     const text = String(params.rawMessage ?? "").toLowerCase();
 
     // Match the register of what they said. Answering "thanks" with "Hello!"
@@ -644,7 +650,7 @@ async function runWorkflow(workflow, params, ctx = {}) {
     return { reply, handled: true, data: { social: true } };
   }
 
-  if (workflow === "out_of_scope") {
+  if (workflow === WORKFLOWS.OUT_OF_SCOPE) {
     // ---- LOG EVERY REFUSAL, WITH THE RAW TEXT --------------------------
     //
     // This is the layer that compounds, and it is the cheapest thing in the
