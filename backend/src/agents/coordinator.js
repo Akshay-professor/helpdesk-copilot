@@ -564,6 +564,82 @@ Strict rules:
  * lets us A/B the two architectures for the written analysis, and what would
  * let us turn multi-agent off in one line if the analysis said to.
  */
+/**
+ * Stage 0 - can this be answered without any agent at all?
+ *
+ * Returns a finished result, or null to carry on to delegation.
+ *
+ * ---------------------------------------------------------------------------
+ * THIS CHECK WAS NOT HERE ORIGINALLY, AND LEAVING IT OUT COST 143x
+ * ---------------------------------------------------------------------------
+ *
+ * Worth writing down exactly what went wrong, because it is the most seductive
+ * mistake in this whole build.
+ *
+ * Build 2 established that "where is order ord_1001?" needs no LLM: a regex
+ * extracts the ID, a database read answers it, and it costs 50ms and ZERO
+ * tokens.
+ *
+ * Then Build 3 put a coordinator in front of everything. And a coordinator
+ * asks an LLM which specialist should handle the request - INCLUDING requests
+ * that need no LLM at all. Measured, on that exact question:
+ *
+ *      single agent     50ms      0 tokens   (workflow route)
+ *      coordinator    7144ms   5664 tokens   (and it got the answer WRONG)
+ *
+ * The new architecture did not just make our best-optimised path 143x slower
+ * and infinitely more expensive. It made it FAIL - the specialist asked the
+ * customer to confirm their email for an order ID the workflow answers without
+ * knowing who is asking.
+ *
+ * THE LESSON, which is the assignment's whole point about multi-agent:
+ *
+ *      A NEW LAYER MUST NOT DISCARD WHAT THE OLD LAYERS LEARNED.
+ *
+ * The coordinator is not the top of the system. It is one option among the
+ * routes we already had, and it belongs BELOW the free ones.
+ */
+async function tryCheapPath(message, { history, onEvent, callerId, startedAt }) {
+  const cheap = routeByPattern(message);
+  if (cheap?.route !== ROUTES.WORKFLOW) return null;
+
+  const outcome = await runWorkflow(cheap.workflow, cheap.params, { callerId });
+  if (!outcome.handled) return null;
+
+  if (onEvent) {
+    onEvent({
+      type: "coordinated",
+      specialists: [],
+      mode: "workflow",
+      reason: "Deterministic workflow - no specialist, no coordinator, no LLM.",
+      latencyMs: 0,
+    });
+    onEvent({ type: "token", text: outcome.reply });
+  }
+
+  return {
+    status: RUN_STATUS.COMPLETE,
+    reply: outcome.reply,
+    messages: [
+      ...history,
+      { role: "user", content: message },
+      { role: "assistant", content: outcome.reply },
+    ],
+    trace: [],
+    iterations: 0,
+    tokensUsed: 0,
+    route: ROUTES.WORKFLOW,
+    routeReason: cheap.reason,
+    durationMs: Date.now() - startedAt,
+    multiAgent: {
+      specialists: [],
+      mode: "workflow",
+      reason: "No agent was needed at all.",
+      delegations: 0,
+    },
+  };
+}
+
 async function runCoordinator(userMessage, options = {}) {
   const { history = [], model, onEvent, callerId } = options;
 
@@ -574,75 +650,9 @@ async function runCoordinator(userMessage, options = {}) {
   const message = userMessage.trim();
   const startedAt = Date.now();
 
-  // ---- 0. THE CHEAP PATH STILL COMES FIRST ------------------------------
-  //
-  // This check was NOT here originally, and leaving it out cost us a
-  // measured 143x. Worth writing down exactly what went wrong, because it is
-  // the most seductive mistake in this whole build.
-  //
-  // Build 2 established that "where is order ord_1001?" needs no LLM: a regex
-  // extracts the ID, a database read answers it, and the whole thing costs
-  // 50ms and ZERO tokens.
-  //
-  // Then Build 3 put a coordinator in front of everything. And a coordinator
-  // asks an LLM which specialist should handle the request - INCLUDING the
-  // requests that need no LLM at all. Measured, on that exact question:
-  //
-  //      single agent   50ms       0 tokens   (workflow route)
-  //      coordinator  7144ms   5664 tokens   (and it got the answer WRONG)
-  //
-  // The new architecture did not just make our best-optimised path 143x
-  // slower and infinitely more expensive. It made it FAIL - the specialist
-  // asked the customer to confirm their email for an order ID that the
-  // workflow answers without knowing who is asking.
-  //
-  // THE LESSON, which is the assignment's whole point about multi-agent:
-  //
-  //      A NEW LAYER MUST NOT DISCARD WHAT THE OLD LAYERS LEARNED.
-  //
-  // The coordinator is not the top of the system. It is one option among the
-  // routes we already had, and it belongs BELOW the free ones.
-  const cheap = routeByPattern(message);
-
-  if (cheap?.route === ROUTES.WORKFLOW) {
-    const outcome = await runWorkflow(cheap.workflow, cheap.params, { callerId });
-
-    if (outcome.handled) {
-      if (onEvent) {
-        onEvent({
-          type: "coordinated",
-          specialists: [],
-          mode: "workflow",
-          reason:
-            "Deterministic workflow - no specialist, no coordinator, no LLM.",
-          latencyMs: 0,
-        });
-        onEvent({ type: "token", text: outcome.reply });
-      }
-
-      return {
-        status: "complete",
-        reply: outcome.reply,
-        messages: [
-          ...history,
-          { role: "user", content: message },
-          { role: "assistant", content: outcome.reply },
-        ],
-        trace: [],
-        iterations: 0,
-        tokensUsed: 0,
-        route: "workflow",
-        routeReason: cheap.reason,
-        durationMs: Date.now() - startedAt,
-        multiAgent: {
-          specialists: [],
-          mode: "workflow",
-          reason: "No agent was needed at all.",
-          delegations: 0,
-        },
-      };
-    }
-  }
+  // ---- 0. The cheap path still comes first ------------------------------
+  const free = await tryCheapPath(message, { history, onEvent, callerId, startedAt });
+  if (free) return free;
 
   // ---- 1. Decide -------------------------------------------------------
   //
