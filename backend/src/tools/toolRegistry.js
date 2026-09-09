@@ -219,6 +219,43 @@ const TOOLS = {
         );
       }
 
+      // ---- THE MODEL WILL INVENT AN EMAIL IF YOU LET IT -----------------
+      //
+      // A customer typed "i am alice". The agent called this tool with
+      // "alice@example.com" - a plausible-looking address nobody had said -
+      // and then told them their account could not be found.
+      //
+      // The system prompt already says "never invent account information".
+      // The model did it anyway, which is the whole lesson of this project
+      // restated: a prompt is a suggestion, a code check is a guarantee.
+      //
+      // These are the reserved documentation domains (RFC 2606). They exist
+      // precisely to be used in examples, so they are exactly what a model
+      // reaches for when it is filling in a blank rather than reading one.
+      // No real customer will ever have one.
+      const PLACEHOLDER_DOMAINS = [
+        "example.com",
+        "example.org",
+        "example.net",
+        "email.com",
+        "domain.com",
+        "test.com",
+        "yourdomain.com",
+      ];
+      const domain = email.split("@")[1]?.toLowerCase() ?? "";
+
+      if (PLACEHOLDER_DOMAINS.includes(domain)) {
+        // Told to the MODEL, not the customer - it is the model that needs
+        // to change behaviour, and it can now ask the question it should
+        // have asked in the first place.
+        return toolError(
+          "email_not_provided",
+          `"${email}" is a placeholder address, not something the customer ` +
+            `told you. Do not guess an email. Ask the customer for the ` +
+            `address on their account and call this tool again with it.`
+        );
+      }
+
       const customer = await repo.findCustomerByEmail(email);
 
       if (!customer) {
