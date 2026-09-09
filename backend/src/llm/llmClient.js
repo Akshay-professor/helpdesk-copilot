@@ -59,7 +59,7 @@ const GROQ_FALLBACK_MODELS = (
   // fallback - it is a slower way to fail.
   //
   // Test a candidate WITH a tools array before adding it, not with "hi".
-  "openai/gpt-oss-120b,openai/gpt-oss-20b"
+  "openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b"
 )
   .split(",")
   .map((m) => m.trim())
