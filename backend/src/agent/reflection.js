@@ -154,10 +154,31 @@ function checkGrounded(draft, trace) {
  * no successful write tool ran in this run.
  */
 function checkNoFalseActions(draft, trace) {
-  const claimsDone =
-    /\b(?:I(?:'ve| have)?\s+(?:issued|refunded|processed|applied|credited|escalated)|has been (?:issued|refunded|processed|applied|credited|escalated)|refund (?:of [^.]* )?has been)\b/i.test(
-      draft
-    );
+  // The subject can be "I", "we", or the thing itself - and the first version
+  // of this pattern only looked for "I". It let this through unchallenged:
+  //
+  //   "We processed a $240 refund for order ord_1001. Refunds are typically
+  //    credited within 3-5 business days."
+  //
+  // No refund had happened. The run was still sitting in the approval queue,
+  // and the customer was told to wait a week for money that was never sent.
+  //
+  // Measured against five real phrasings, the old pattern caught two.
+  //
+  // LESSON: when a check exists to catch a lie, enumerate the ways the lie
+  // gets phrased - not just the way you first saw it.
+  const ACTION = "(?:issued|refunded|processed|applied|credited|escalated|completed|sent)";
+  const claimsDone = new RegExp(
+    [
+      // "I've issued", "we have refunded", "we processed"
+      `\\b(?:I|we)(?:'ve| have|'ll| will)?\\s+(?:already\\s+)?${ACTION}\\b`,
+      // "has been processed", "have been credited"
+      `\\b(?:has|have|was|were)\\s+(?:been\\s+)?${ACTION}\\b`,
+      // "your refund is on its way", "the refund is complete"
+      `\\brefund\\b[^.]{0,40}\\b(?:is|are)\\s+(?:now\\s+)?(?:complete|done|on its way|in progress)\\b`,
+    ].join("|"),
+    "i"
+  ).test(draft);
 
   if (!claimsDone) return { pass: true };
 

@@ -414,7 +414,56 @@ async function routeRequest(message, options = {}) {
 
   const isPleasantry = PLEASANTRIES.has(trimmed);
 
+  // ---- BUT THE SCOPE GUARD IS NEVER SKIPPED ----------------------------
+  //
+  // The bug this closes, which I introduced with the continuation guard
+  // itself:
+  //
+  //   agent: "You're very welcome. Anything else I can help with?"
+  //   user:  "who is pm of india? where is my refund?"
+  //   agent: "The current Prime Minister of India is Narendra Modi."
+  //
+  // That closing pleasantry ends in a question mark, so `agentAsked` was
+  // true, so the continuation guard returned AUTONOMOUS before the scope
+  // patterns ever ran. A safety check that any earlier branch can jump over
+  // is not a safety check.
+  //
+  // Being mid-conversation is a reason to skip the cheap SHORTCUTS - the
+  // workflow templates and the social replies, which lack the context to
+  // answer a follow-up. It is never a reason to skip a REFUSAL.
+  //
+  // So: run the out-of-scope patterns first, and let them win.
+  const scoped = routeByPattern(message);
+  if (scoped?.workflow === "out_of_scope") {
+    return { ...scoped, stage: scoped.stage ?? "pattern" };
+  }
+
   if (agentAsked && !isPleasantry) {
+    // The regex above only catches what somebody thought of in advance, and
+    // measured against nine evasions it caught none of them. So ask the
+    // classifier too before waving this through - it reads meaning, and a
+    // refusal it returns must outrank "we are mid-conversation" for the same
+    // reason the patterns do.
+    //
+    // This costs ~600ms on continuation turns. Worth it: the alternative is a
+    // support agent that will answer anything at all as long as its previous
+    // sentence happened to end in a question mark.
+    if (isConfigured()) {
+      const intent = await classifyIntent(message);
+      if (intent?.route === "out_of_scope") {
+        return {
+          route: ROUTES.WORKFLOW,
+          workflow: "out_of_scope",
+          params: { category: "classifier", rawMessage: message },
+          reason:
+            `Classified as UNRELATED in ${intent.latencyMs}ms - refused even ` +
+            `though the agent had asked a question.`,
+          stage: "classifier",
+          classifier: { label: intent.label, latencyMs: intent.latencyMs },
+        };
+      }
+    }
+
     return {
       route: ROUTES.AUTONOMOUS,
       reason:
