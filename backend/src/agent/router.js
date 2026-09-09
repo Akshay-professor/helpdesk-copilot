@@ -352,207 +352,141 @@ function routeByPattern(message) {
 async function routeRequest(message, options = {}) {
   const history = options.history ?? [];
 
-  // ---- Stage 0: ARE WE MID-CONVERSATION? --------------------------------
+  // Everything this function needs to decide, gathered once.
   //
-  // THE BUG THIS FIXES, which was mine and was bad:
-  //
-  //     user:  check my orders
-  //     agent: Could you let me know the email address you use?
-  //     user:  alice@shop.com
-  //     agent: Hello! I can help with your orders...      <- LOOP
-  //
-  // The SOCIAL route classified alice@shop.com as someone introducing
-  // themselves - which, read in isolation, it is. But it was not in
-  // isolation. It was an ANSWER to a question the agent had just asked, and
-  // routing threw it away and greeted the customer again. Forever.
-  //
-  // The router was judging every message as if it were the first one.
-  //
-  // So: if the last thing the agent did was ask a question, the next message
-  // is an answer. It goes to the agent, which has the context to use it. No
-  // template can, because the template does not know what was asked.
-  const lastAssistant = [...history].reverse().find((m) => m.role === "assistant");
-  // A question ANYWHERE in the reply counts, not just at the end.
-  //
-  // The first version tested endsWith("?") and missed the most common shape
-  // an agent actually produces:
-  //
-  //   "Could you provide the email linked to your account? Once I have
-  //    that, I can look up your orders."
-  //
-  // The question is in the middle; the reply ends on a full stop. So the
-  // guard never fired and the loop survived the fix meant to kill it.
-  //
-  // Also catch the polite imperative - "please provide your email" - which
-  // is a request for information with no question mark at all.
-  const lastText =
-    typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
+  // The previous version computed some of these twice - routeByPattern ran
+  // twice and, on a continuation turn, the classifier could be called TWICE
+  // for one message. Nobody wrote that deliberately; it accumulated as each
+  // bug was fixed by adding another branch at the top.
+  const patterns = routeByPattern(message);
+  const midConversation = isAnswerToAQuestion(message, history);
 
-  const agentAsked =
-    lastText.includes("?") ||
-    /(please (provide|share|confirm|let me know|tell me)|could you (please )?(provide|share|confirm)|what('s| is) your|i('ll| will) need your)/i.test(
-      lastText
-    );
+  // The classifier is the expensive input (~600ms), so it is fetched lazily
+  // and at most once, no matter how many rules want to consult it.
+  let intentCache;
+  const intent = async () => {
+    if (intentCache === undefined) {
+      intentCache = isConfigured() ? await classifyIntent(message) : null;
+    }
+    return intentCache;
+  };
 
-  // ...unless the message is CLEARLY still just conversation. A greeting or a
-  // thank-you after a question is not an answer to it, and sending those to
-  // the agent invites it to invent the answer it was waiting for - which it
-  // did, hallucinating "alice@example.com" from the message "My name is
-  // alice".
+  // ---- THE RULES, IN PRIORITY ORDER -------------------------------------
   //
-  // Only real content continues the conversation. Pleasantries do not.
-  // A SET, not a regex.
+  // Read top to bottom: the first rule that returns a route wins. That
+  // ordering IS the policy, and it is the thing a reader needs to understand,
+  // so it lives in one list rather than spread through nested branches.
   //
-  // This is the SECOND time in this file that a backslash-b became a literal
-  // backspace character (0x08) while being written through a shell, leaving a
-  // pattern that read perfectly on screen and matched nothing at runtime.
-  // A fixed list of words needs no pattern, so it cannot have that bug.
-  const trimmed = String(message || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[.!?]+$/, "");
-
-  const isPleasantry = PLEASANTRIES.has(trimmed);
-
-  // ---- BUT THE SCOPE GUARD IS NEVER SKIPPED ----------------------------
-  //
-  // The bug this closes, which I introduced with the continuation guard
-  // itself:
-  //
-  //   agent: "You're very welcome. Anything else I can help with?"
-  //   user:  "who is pm of india? where is my refund?"
-  //   agent: "The current Prime Minister of India is Narendra Modi."
-  //
-  // That closing pleasantry ends in a question mark, so `agentAsked` was
-  // true, so the continuation guard returned AUTONOMOUS before the scope
-  // patterns ever ran. A safety check that any earlier branch can jump over
-  // is not a safety check.
-  //
-  // Being mid-conversation is a reason to skip the cheap SHORTCUTS - the
-  // workflow templates and the social replies, which lack the context to
-  // answer a follow-up. It is never a reason to skip a REFUSAL.
-  //
-  // So: run the out-of-scope patterns first, and let them win.
-  const scoped = routeByPattern(message);
-  if (scoped?.workflow === "out_of_scope") {
-    return { ...scoped, stage: scoped.stage ?? "pattern" };
-  }
-
-  if (agentAsked && !isPleasantry) {
-    // The regex above only catches what somebody thought of in advance, and
-    // measured against nine evasions it caught none of them. So ask the
-    // classifier too before waving this through - it reads meaning, and a
-    // refusal it returns must outrank "we are mid-conversation" for the same
-    // reason the patterns do.
+  // Adding a route means adding one entry here. It does not mean finding the
+  // right place among eleven ifs and hoping.
+  const RULES = [
+    // 1. REFUSALS FIRST, ALWAYS.
     //
-    // This costs ~600ms on continuation turns. Worth it: the alternative is a
-    // support agent that will answer anything at all as long as its previous
-    // sentence happened to end in a question mark.
-    if (isConfigured()) {
-      const intent = await classifyIntent(message);
-      if (intent?.route === "out_of_scope") {
+    //    This is a hard-won ordering. When the mid-conversation rule sat
+    //    above the refusals, this happened:
+    //
+    //      agent: "You're very welcome. Anything else I can help with?"
+    //      user:  "who is pm of india? where is my refund?"
+    //      agent: "The current Prime Minister of India is Narendra Modi."
+    //
+    //    A closing pleasantry ends in "?", so the message looked like an
+    //    answer, so the scope check never ran. A safety rule that a later
+    //    branch can jump over is not a safety rule - it goes first.
+    {
+      name: "scope-pattern",
+      run: () =>
+        patterns?.workflow === "out_of_scope"
+          ? { ...patterns, stage: "pattern" }
+          : null,
+    },
+    {
+      name: "scope-classifier",
+      // The regex only catches what somebody thought of in advance; measured
+      // against nine evasions (Hindi, French, "P.M.", spaced letters) it
+      // caught none. The classifier reads meaning, so it gets a say on every
+      // message - including one that arrives mid-conversation.
+      run: async () => {
+        const i = await intent();
+        return i?.route === "out_of_scope"
+          ? refusal(message, i)
+          : null;
+      },
+    },
+
+    // 2. MID-CONVERSATION: an answer needs the conversation, not a template.
+    //
+    //    Below the refusals, above everything else. A template cannot answer
+    //    a follow-up because it does not know what was asked.
+    {
+      name: "continuation",
+      run: () =>
+        midConversation
+          ? {
+              route: ROUTES.AUTONOMOUS,
+              reason:
+                "The agent asked a question on the previous turn, so this " +
+                "message is an answer - it needs the conversation.",
+              stage: "continuation",
+            }
+          : null,
+    },
+
+    // 3. THE FREE PATH: regex workflows and guided categories.
+    {
+      name: "patterns",
+      run: () => (patterns ? { ...patterns, stage: patterns.stage ?? "pattern" } : null),
+    },
+
+    // 4. THE CHEAP PATH: one small-model call decides the rest.
+    {
+      name: "classifier",
+      run: async () => {
+        const i = await intent();
+        if (!i) return null;
+
+        if (i.route === "social") {
+          return {
+            route: ROUTES.WORKFLOW,
+            workflow: "social",
+            params: { rawMessage: message },
+            reason: `Conversational opener (${i.latencyMs}ms) - template, 0 tokens.`,
+            stage: "classifier",
+            classifier: { label: i.label, latencyMs: i.latencyMs },
+          };
+        }
+
+        if (i.route === ROUTES.GUIDED && GUIDED_TOOLSETS[i.category]) {
+          return {
+            route: ROUTES.GUIDED,
+            category: i.category,
+            tools: GUIDED_TOOLSETS[i.category],
+            reason:
+              `Intent classified as ${i.label} in ${i.latencyMs}ms. ` +
+              `Restricted to ${GUIDED_TOOLSETS[i.category].length} of 9 tools.`,
+            stage: "classifier",
+            classifier: { label: i.label, latencyMs: i.latencyMs, tokens: i.tokens },
+          };
+        }
+
         return {
-          route: ROUTES.WORKFLOW,
-          workflow: "out_of_scope",
-          params: { category: "classifier", rawMessage: message },
-          reason:
-            `Classified as UNRELATED in ${intent.latencyMs}ms - refused even ` +
-            `though the agent had asked a question.`,
+          route: ROUTES.AUTONOMOUS,
+          reason: `Intent classified as ${i.label} - needs the full toolset.`,
           stage: "classifier",
-          classifier: { label: intent.label, latencyMs: intent.latencyMs },
+          classifier: { label: i.label, latencyMs: i.latencyMs, tokens: i.tokens },
         };
-      }
-    }
+      },
+    },
+  ];
 
-    return {
-      route: ROUTES.AUTONOMOUS,
-      reason:
-        "The agent asked a question on the previous turn, so this message is " +
-        "an answer - it needs the conversation, not a template.",
-      stage: "continuation",
-    };
+  for (const rule of RULES) {
+    const decision = await rule.run();
+    if (decision) return decision;
   }
 
-  // ---- Stage 1 -----------------------------------------------------------
-  const byPattern = routeByPattern(message);
-  if (byPattern) return { ...byPattern, stage: byPattern.stage ?? "pattern" };
-
-  // ---- Stage 2 -----------------------------------------------------------
-  if (isConfigured()) {
-    const intent = await classifyIntent(message);
-
-    // ---- The semantic scope guard ---------------------------------------
-    //
-    // Stage 0's regex catches what we thought of in advance. THIS catches what
-    // we did not - because it reads meaning rather than matching words.
-    //
-    // Measured against nine deliberate evasions (Hindi, French, "P.M." with
-    // dots, spaced-out letters, a DAN jailbreak, a store question with an
-    // unrelated rider):
-    //
-    //     regex only      0 / 9 caught
-    //     + classifier    9 / 9 caught
-    //
-    // Two layers, cheapest first. The regex is free and instant and works when
-    // Groq is down; the classifier is ~600ms and catches everything else. A
-    // request has to get past BOTH to reach an agent.
-    // ---- SOCIAL: ordinary conversation ---------------------------------
-    //
-    // Greetings, names, thanks, "are you there?". These are how a real support
-    // conversation begins, and they were being REFUSED - a customer typing
-    // "Hey" was told "I only handle questions about this store".
-    //
-    // They get a template, not an agent: zero tokens, instant, and warm. There
-    // is no judgement in answering "hello", so paying a model to do it would
-    // be the same mistake the whole routing layer exists to avoid.
-    if (intent && intent.route === "social") {
-      return {
-        route: ROUTES.WORKFLOW,
-        workflow: "social",
-        params: { rawMessage: message },
-        reason: `Conversational opener (${intent.latencyMs}ms) - answered from a template, 0 tokens.`,
-        stage: "classifier",
-        classifier: { label: intent.label, latencyMs: intent.latencyMs, tokens: intent.tokens },
-      };
-    }
-
-    if (intent && intent.route === "out_of_scope") {
-      return {
-        route: ROUTES.WORKFLOW,
-        workflow: "out_of_scope",
-        params: { category: "classifier", rawMessage: message },
-        reason:
-          `Classified as UNRELATED in ${intent.latencyMs}ms - refused without ` +
-          `reaching an agent.`,
-        stage: "classifier",
-        classifier: { label: intent.label, latencyMs: intent.latencyMs, tokens: intent.tokens },
-      };
-    }
-
-    if (intent && intent.route === ROUTES.GUIDED && GUIDED_TOOLSETS[intent.category]) {
-      return {
-        route: ROUTES.GUIDED,
-        category: intent.category,
-        tools: GUIDED_TOOLSETS[intent.category],
-        reason:
-          `Intent classified as ${intent.label} in ${intent.latencyMs}ms. ` +
-          `Restricted to ${GUIDED_TOOLSETS[intent.category].length} of 8 tools.`,
-        stage: "classifier",
-        classifier: { label: intent.label, latencyMs: intent.latencyMs, tokens: intent.tokens },
-      };
-    }
-
-    if (intent) {
-      return {
-        route: ROUTES.AUTONOMOUS,
-        reason: `Intent classified as ${intent.label} - needs the full toolset.`,
-        stage: "classifier",
-        classifier: { label: intent.label, latencyMs: intent.latencyMs, tokens: intent.tokens },
-      };
-    }
-  }
-
-  // ---- Fallback ----------------------------------------------------------
+  // ---- NOBODY HAD AN OPINION --------------------------------------------
+  //
+  // Slower and dearer, never broken. A classifier outage must degrade the
+  // system, not stop it.
   return {
     route: ROUTES.AUTONOMOUS,
     reason: isConfigured()
@@ -561,6 +495,56 @@ async function routeRequest(message, options = {}) {
     stage: "fallback",
   };
 }
+
+/** Shape a classifier refusal. Kept here so both scope rules agree. */
+function refusal(message, intent) {
+  return {
+    route: ROUTES.WORKFLOW,
+    workflow: "out_of_scope",
+    params: { category: "classifier", rawMessage: message },
+    reason: `Classified as ${intent.label} in ${intent.latencyMs}ms - refused before any agent ran.`,
+    stage: "classifier",
+    classifier: { label: intent.label, latencyMs: intent.latencyMs },
+  };
+}
+
+/**
+ * Is this message an ANSWER to something the agent just asked?
+ *
+ * Extracted from routeRequest because it is a genuine question about the
+ * conversation, and burying it inline made the routing sequence unreadable.
+ *
+ * Two things it has to get right, both learned from bugs:
+ *
+ *   A question can sit ANYWHERE in the reply. The first version tested
+ *   endsWith("?") and missed the commonest shape an agent produces -
+ *   "Could you provide your email? Once I have that, I can look up your
+ *   orders." - so the fix for the greeting loop did not actually fix it.
+ *
+ *   A pleasantry is not an answer. Sending "hi" or "thanks" to the agent
+ *   invited it to invent the value it was waiting for, and it did:
+ *   "alice@example.com", hallucinated from "My name is alice".
+ */
+function isAnswerToAQuestion(message, history) {
+  const lastAssistant = [...history].reverse().find((m) => m.role === "assistant");
+  const lastText = typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
+
+  const agentAsked =
+    lastText.includes("?") ||
+    /(please (provide|share|confirm|let me know|tell me)|could you (please )?(provide|share|confirm)|what('s| is) your|i('ll| will) need your)/i.test(
+      lastText
+    );
+
+  if (!agentAsked) return false;
+
+  const trimmed = String(message || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/, "");
+
+  return !PLEASANTRIES.has(trimmed);
+}
+
 
 // ---------------------------------------------------------------------------
 // Workflow handlers - no LLM anywhere in here
