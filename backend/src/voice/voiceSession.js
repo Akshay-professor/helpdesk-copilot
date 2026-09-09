@@ -516,7 +516,27 @@ class VoiceSession {
       return { transcript, discarded: true };
     }
 
-    if (result.history) this.history = result.history;
+    // ---- KEEP THE CONVERSATION -----------------------------------------
+    //
+    // The agent core returns the running transcript as `messages`. Only the
+    // HTTP layer renames it to `history` on the way out (server.js), and this
+    // line was reading the renamed field that voice never receives.
+    //
+    // So `result.history` was undefined on EVERY turn and this.history never
+    // grew. On the phone that produced a loop with no way out:
+    //
+    //   caller: I got charged twice
+    //   agent:  Could you provide the email on your account?
+    //   caller: alice@shop.com
+    //   agent:  Hello! I can help with orders...      <- forgot it asked
+    //
+    // The router fix that ended this loop in chat could not help here,
+    // because it reasons about the previous turn and voice was handing it an
+    // empty history every time.
+    //
+    // Read both names: `messages` is what the core actually returns.
+    const updated = result.messages ?? result.history;
+    if (Array.isArray(updated) && updated.length > 0) this.history = updated;
 
     // ---- PAUSED FOR APPROVAL -------------------------------------------
     if (result.status === "awaiting_confirmation") {
