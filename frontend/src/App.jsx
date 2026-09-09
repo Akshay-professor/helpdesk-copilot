@@ -5,6 +5,7 @@ import TraceViewer from "./TraceViewer";
 import OperatorQueue from "./OperatorQueue";
 import VoiceCall from "./VoiceCall";
 import ResearchPanel from "./ResearchPanel";
+import Markdown from "./Markdown";
 import CostDashboard from "./CostDashboard";
 import { getApprovals } from "./api";
 
@@ -86,8 +87,43 @@ export default function App() {
     });
 
     if (result.status === "awaiting_confirmation") {
-      // Hold the whole result: /chat/confirm needs `state` back verbatim.
-      setPending(result);
+      // ---- WHO IS BEING ASKED? -------------------------------------------
+      //
+      // Two different pauses wear the same status, and showing the customer
+      // the wrong one is a real problem:
+      //
+      //   requiresOperator = false   the CUSTOMER can confirm their own small
+      //                              refund. Show them the modal.
+      //
+      //   requiresOperator = true    a SUPERVISOR must decide. Putting an
+      //                              Approve button in front of the customer
+      //                              for a $205 refund asks the person who
+      //                              RECEIVES the money to authorise it -
+      //                              which is not an approval, it is a
+      //                              formality with a button.
+      //
+      // In the second case the customer is told what happens next, and the
+      // item waits in the Approvals tab where a supervisor works the queue.
+      const c = result.confirmation ?? result.pending;
+      const needsOperator = c?.requiresOperator || c?.summary?.requiresOperator;
+
+      if (needsOperator) {
+        setPending(null);
+        const what = c.detail ?? c.summary?.detail ?? "your request";
+        setMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            text:
+              "I've sent this to our support team for approval: " +
+              what +
+              ". You'll hear back once it has been reviewed — usually within the hour.",
+          },
+        ]);
+      } else {
+        // Hold the whole result: /chat/confirm needs `state` back verbatim.
+        setPending(result);
+      }
     } else {
       setPending(null);
       if (result.reply) {
@@ -260,7 +296,15 @@ export default function App() {
                   className="msg-body"
                   style={m.error ? { color: "var(--danger)" } : undefined}
                 >
-                  {m.text}
+                  {/* The model writes markdown. Printing it raw showed
+                      customers "| Order ID |---|" and "**ord_1001**". The
+                      renderer builds React elements, never HTML strings, so
+                      model output cannot inject markup. */}
+                  {m.role === "assistant" && !m.error ? (
+                    <Markdown text={m.text} />
+                  ) : (
+                    m.text
+                  )}
                 </div>
               </div>
             ))}

@@ -25,6 +25,7 @@ const { requireOwnership } = require("../policy/authorization");
 
 const {
   TIER,
+  LIMITS,
   ESCALATION_PRIORITIES,
   checkRefundAmount,
   checkCreditAmount,
@@ -1129,6 +1130,33 @@ function describeToolCall(name, rawArgs) {
         irreversible: true,
         warning: "This tool has side effects.",
       };
+
+  // ---- WHO IS ALLOWED TO APPROVE THIS? ---------------------------------
+  //
+  // Not every approval is the same kind of approval.
+  //
+  //   A customer can confirm their OWN small refund on a call. They are the
+  //     one owed the money; "yes, refund my duplicate charge" is consent,
+  //     not authorisation.
+  //
+  //   A customer cannot approve a LARGE refund. That is a supervisor
+  //     decision, and asking the person who benefits from it to authorise it
+  //     is not an approval at all - it is a formality with a microphone.
+  //
+  // This flag was READ by the voice session from the start and never SET by
+  // anything, so every amount fell to "ask the caller" - including a 05
+  // refund that should have gone to the operator queue.
+  //
+  // The threshold is the policy's own autoApproveMax, not a second number
+  // invented here. One source of truth for what counts as large.
+  const amount = typeof args.amount === "number" ? args.amount : null;
+  if (amount !== null && (name === "issueRefund" || name === "applyAccountCredit")) {
+    const limit =
+      name === "issueRefund"
+        ? LIMITS.refund.autoApproveMax
+        : LIMITS.credit.autoApproveMax;
+    summary.requiresOperator = amount > limit;
+  }
 
   return { ok: true, summary, args };
 }
