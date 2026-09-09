@@ -4,6 +4,7 @@ import ConfirmModal from "./ConfirmModal";
 import TraceViewer from "./TraceViewer";
 import OperatorQueue from "./OperatorQueue";
 import VoiceCall from "./VoiceCall";
+import ResearchPanel from "./ResearchPanel";
 import CostDashboard from "./CostDashboard";
 import { getApprovals } from "./api";
 
@@ -182,6 +183,12 @@ export default function App() {
           >
             Voice
           </button>
+          <button
+            className={`tab ${view === "research" ? "on" : ""}`}
+            onClick={() => setView("research")}
+          >
+            Research
+          </button>
         </div>
 
         <label className="toggle" title="Route this request through the coordinator and its specialists">
@@ -219,6 +226,10 @@ export default function App() {
         that a hidden tab keeps polling; the benefit is that a phone call does
         not end because you glanced at the approvals queue.
       */}
+      <div hidden={view !== "research"} className="tabpanel">
+        <ResearchPanel active={view === "research"} />
+      </div>
+
       <div hidden={view !== "voice"} className="tabpanel">
         <VoiceCall active={view === "voice"} />
       </div>
