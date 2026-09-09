@@ -853,8 +853,41 @@ connectDB();
 connectVectorStore();
 connectRedis();
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// `listening`, not app.listen's callback.
+//
+// The callback fired even on a failed bind, so a collision printed
+// "Server running on port 5000" immediately above "EADDRINUSE" - the log
+// claiming success one line before the failure that contradicts it.
+const server = app.listen(PORT);
+server.on("listening", () => console.log(`Server running on port ${PORT}`));
+
+// ---- A USEFUL MESSAGE WHEN THE PORT IS TAKEN ------------------------------
+//
+// Node's default here is a 20-line stack trace ending in EADDRINUSE, which
+// tells you WHAT happened and nothing about what to do. It has cost real time
+// in this project more than once, always for the same reason: an older server
+// process was still running and holding the port.
+//
+// The stack trace is worthless for this error - the fault is never in the
+// code the trace points at. So we replace it with the two things you actually
+// need: what is holding the port, and the command that frees it.
+server.on("error", (err) => {
+  if (err.code !== "EADDRINUSE") throw err;
+
+  console.error(
+    `\nPort ${PORT} is already in use.\n\n` +
+      `  Almost always an older server still running. Find and stop it:\n\n` +
+      `    PowerShell:\n` +
+      `      Get-NetTCPConnection -LocalPort ${PORT} -State Listen |\n` +
+      `        Select-Object OwningProcess\n` +
+      `      Stop-Process -Id <that id> -Force\n\n` +
+      `    Or stop every node process (kills your other terminals too):\n` +
+      `      Get-Process node | Stop-Process -Force\n\n` +
+      `  Worth checking StartTime while you are there: a process older than\n` +
+      `  your last edit is serving stale code, which is how "I fixed it but\n` +
+      `  nothing changed" happens.\n`
+  );
+  process.exit(1);
 });
 
 // ---- VOICE ---------------------------------------------------------------

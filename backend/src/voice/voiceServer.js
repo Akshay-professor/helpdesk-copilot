@@ -205,7 +205,24 @@ function attachVoiceServer(httpServer, { path = "/voice" } = {}) {
     ws.on("error", (err) => console.error("[voice] socket error:", err.message));
   });
 
-  console.log(`[voice] websocket listening on ${path}`);
+  // Logged only once the HTTP server is actually listening.
+  //
+  // This used to print immediately, so a failed start looked like this:
+  //
+  //     [voice] websocket listening on /voice
+  //     Server running on port 5000
+  //     Error: listen EADDRINUSE
+  //
+  // Two lines claiming success directly above the failure. A startup log that
+  // announces things before they are true makes every failure harder to read
+  // than it needs to be.
+  if (httpServer.listening) {
+    console.log(`[voice] websocket listening on ${path}`);
+  } else {
+    httpServer.once("listening", () =>
+      console.log(`[voice] websocket listening on ${path}`)
+    );
+  }
   return wss;
 }
 
