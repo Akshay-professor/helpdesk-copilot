@@ -812,6 +812,12 @@ function formatAgentResult(result) {
         reason: result.pending.summary.reason,
         irreversible: result.pending.summary.irreversible,
         warning: result.pending.summary.warning,
+        // Whether a SUPERVISOR must decide this, rather than the customer.
+        // Forgotten on the first pass, and the symptom was quiet: the flag
+        // was set correctly in the tool layer, arrived as undefined in the
+        // browser, and the customer was shown an Approve button for a $205
+        // refund. An explicit field list is safe until someone adds a field.
+        requiresOperator: Boolean(result.pending.summary.requiresOperator),
         tool: result.pending.name,
         arguments: result.pending.arguments,
       },
