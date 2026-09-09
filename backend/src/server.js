@@ -17,6 +17,10 @@ const express = require("express");
 const { runAgent, resumeAgent } = require("./agent/agentRunner");
 const { runCoordinator } = require("./agents/coordinator");
 const { runResearch, getReport, listReports } = require("./research/researchAgent");
+// "./constants", not "constants" - the bare name resolves to Node's OWN
+// built-in constants module, which loads happily and has no RUN_STATUS on it.
+// So every status check would silently compare against undefined.
+const { RUN_STATUS } = require("./constants");
 
 /**
  * Which architecture handles this request: the single agent, or the
@@ -181,7 +185,7 @@ app.post("/approvals/:runId", async (req, res) => {
     // that proves the Step 6 design: everything resumeAgent needs is data, so
     // a server that has never seen this run can finish it.
     const state = {
-      status: "awaiting_confirmation",
+      status: RUN_STATUS.AWAITING_CONFIRMATION,
       pending: claimed.pending,
       messages: claimed.messages,
       trace: claimed.trace,
@@ -205,7 +209,7 @@ app.post("/approvals/:runId", async (req, res) => {
 
     res.json(formatAgentResult(result));
   } catch (err) {
-    // Un-claim, or the run is stranded in "resuming" forever - invisible to the
+    // Un-claim, or the run is stranded in RUN_STATUS.RESUMING forever - invisible to the
     // queue and impossible to approve.
     await releaseRun(req.params.runId);
     console.error("[/approvals] resume failed:", err);
@@ -399,7 +403,7 @@ app.get("/costs", async (req, res) => {
           },
         },
         pauses: {
-          $sum: { $cond: [{ $eq: ["$status", "awaiting_confirmation"] }, 1, 0] },
+          $sum: { $cond: [{ $eq: ["$status", RUN_STATUS.AWAITING_CONFIRMATION] }, 1, 0] },
         },
       },
     },
@@ -801,7 +805,7 @@ function formatAgentResult(result) {
     ...(result.multiAgent && { multiAgent: result.multiAgent }),
   };
 
-  if (result.status === "awaiting_confirmation") {
+  if (result.status === RUN_STATUS.AWAITING_CONFIRMATION) {
     return {
       ...base,
       // What the UI shows in the confirmation modal - a readable sentence,

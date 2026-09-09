@@ -111,6 +111,7 @@
 const { runAgent } = require("../agent/agentRunner");
 const { callLLM } = require("../llm/llmClient");
 const { routeByPattern, runWorkflow, ROUTES } = require("../agent/router");
+const { RUN_STATUS } = require("../constants");
 const {
   getSpecialist,
   specialistNames,
@@ -484,7 +485,7 @@ async function runSpecialist(name, { task, message, findings, gaps, callerId, mo
     // A specialist that paused for approval hands the WHOLE paused result back
     // up. The coordinator does not try to resolve it - approval is a human's
     // job, and the pause must reach the human unchanged.
-    paused: result.status === "awaiting_confirmation" ? result : null,
+    paused: result.status === RUN_STATUS.AWAITING_CONFIRMATION ? result : null,
     tokensUsed: result.tokensUsed ?? 0,
     iterations: result.iterations ?? 0,
     trace: result.trace ?? [],

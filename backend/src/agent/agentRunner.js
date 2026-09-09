@@ -41,6 +41,7 @@
  */
 
 const crypto = require("crypto");
+const { RUN_STATUS } = require("../constants");
 
 const { callLLM } = require("../llm/llmClient");
 const { saveRun } = require("../db/persistence");
@@ -467,7 +468,7 @@ async function runLoop(state) {
 
         trace.push(entry);
 
-        emit("awaiting_confirmation", {
+        emit(RUN_STATUS.AWAITING_CONFIRMATION, {
           tool: name,
           summary: described.summary,
           arguments: described.args,
@@ -478,7 +479,7 @@ async function runLoop(state) {
         // picked up by a different process tomorrow.
         return finish(
           {
-            status: "awaiting_confirmation",
+            status: RUN_STATUS.AWAITING_CONFIRMATION,
             pending: {
             toolCallId: call.id,
             name,
@@ -655,7 +656,7 @@ async function runLoop(state) {
  * @param {Array}  [options.history] - prior messages, for multi-turn chat
  * @param {string} [options.model]
  *
- * @returns {Promise<Object>} status "complete" or "awaiting_confirmation"
+ * @returns {Promise<Object>} status "complete" or RUN_STATUS.AWAITING_CONFIRMATION
  */
 async function runAgent(userMessage, options = {}) {
   const {

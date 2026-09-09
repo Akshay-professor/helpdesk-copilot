@@ -32,6 +32,7 @@ const crypto = require("crypto");
 const { runAgent, resumeAgent } = require("../agent/agentRunner");
 const { formatForSpeech } = require("./speechFormat");
 const { transcribe } = require("./stt");
+const { RUN_STATUS } = require("../constants");
 
 // ---------------------------------------------------------------------------
 // PROBLEM 1: silence feels like a dropped call
@@ -539,7 +540,7 @@ class VoiceSession {
     if (Array.isArray(updated) && updated.length > 0) this.history = updated;
 
     // ---- PAUSED FOR APPROVAL -------------------------------------------
-    if (result.status === "awaiting_confirmation") {
+    if (result.status === RUN_STATUS.AWAITING_CONFIRMATION) {
       // The agent returns this as `pending`, not `confirmation`. Worth a note
       // because the first version of this file guessed the field name, found
       // undefined, and cheerfully said "Just to confirm - this action" - a

@@ -38,6 +38,7 @@
 
 const { AgentRun } = require("../db/models");
 const { isConnected } = require("../db/connection");
+const { RUN_STATUS } = require("../constants");
 
 /**
  * How long a pending approval waits before it is abandoned.
@@ -70,7 +71,7 @@ const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 async function listPending({ limit = 50 } = {}) {
   if (!isConnected()) return [];
 
-  const runs = await AgentRun.find({ status: "awaiting_confirmation" })
+  const runs = await AgentRun.find({ status: RUN_STATUS.AWAITING_CONFIRMATION })
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -111,7 +112,7 @@ async function listPending({ limit = 50 } = {}) {
 /** One pending run in full, for the detail view. */
 async function getPending(runId) {
   if (!isConnected()) return null;
-  return AgentRun.findOne({ runId, status: "awaiting_confirmation" }).lean();
+  return AgentRun.findOne({ runId, status: RUN_STATUS.AWAITING_CONFIRMATION }).lean();
 }
 
 /**
@@ -119,10 +120,10 @@ async function getPending(runId) {
  *
  * THIS IS THE IDEMPOTENCY GUARANTEE, and it is one line of query:
  *
- *     { runId, status: "awaiting_confirmation" }  ->  { status: "resuming" }
+ *     { runId, status: RUN_STATUS.AWAITING_CONFIRMATION }  ->  { status: RUN_STATUS.RESUMING }
  *
  * `findOneAndUpdate` in MongoDB is atomic. Two simultaneous approvals both try
- * to match a document whose status is still "awaiting_confirmation"; exactly
+ * to match a document whose status is still RUN_STATUS.AWAITING_CONFIRMATION; exactly
  * one wins, and the loser gets null because the status already changed.
  *
  * The naive version is the same race we hit in the rate limiter:
@@ -140,8 +141,8 @@ async function claimRun(runId) {
   if (!isConnected()) return null;
 
   return AgentRun.findOneAndUpdate(
-    { runId, status: "awaiting_confirmation" },
-    { status: "resuming", claimedAt: new Date() },
+    { runId, status: RUN_STATUS.AWAITING_CONFIRMATION },
+    { status: RUN_STATUS.RESUMING, claimedAt: new Date() },
     { returnDocument: "after" }
   ).lean();
 }
@@ -149,15 +150,15 @@ async function claimRun(runId) {
 /**
  * Release a claim if the resume failed.
  *
- * Without this, a crash mid-resume leaves the run stuck in "resuming" forever -
+ * Without this, a crash mid-resume leaves the run stuck in RUN_STATUS.RESUMING forever -
  * invisible to the queue and impossible to approve. Claiming something you
  * might not finish requires a way to un-claim it.
  */
 async function releaseRun(runId) {
   if (!isConnected()) return;
   await AgentRun.updateOne(
-    { runId, status: "resuming" },
-    { status: "awaiting_confirmation", claimedAt: null }
+    { runId, status: RUN_STATUS.RESUMING },
+    { status: RUN_STATUS.AWAITING_CONFIRMATION, claimedAt: null }
   );
 }
 
@@ -172,7 +173,7 @@ async function expireStale() {
 
   const cutoff = new Date(Date.now() - APPROVAL_TTL_MS);
   const stale = await AgentRun.find({
-    status: "awaiting_confirmation",
+    status: RUN_STATUS.AWAITING_CONFIRMATION,
     createdAt: { $lt: cutoff },
   }).lean();
 
@@ -196,8 +197,8 @@ async function expireStale() {
   // approved in the moment between the find and the update is not clobbered.
   const ids = stale.map((r) => r.runId);
   const result = await AgentRun.updateMany(
-    { runId: { $in: ids }, status: "awaiting_confirmation" },
-    { $set: { status: "expired", expiredAt: new Date() } }
+    { runId: { $in: ids }, status: RUN_STATUS.AWAITING_CONFIRMATION },
+    { $set: { status: RUN_STATUS.EXPIRED, expiredAt: new Date() } }
   );
 
   console.log(
