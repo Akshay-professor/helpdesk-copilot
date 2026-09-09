@@ -351,55 +351,79 @@ class VoiceSession {
   }
 
   /** A normal question. */
-  async runTurn(transcript, generation) {
+  /**
+   * The filler clock - "let me look into that for you" while work happens.
+   *
+   * Extracted from runTurn because it is a self-contained machine with its own
+   * timers and counter, and inlining it made the actual turn logic hard to
+   * find underneath.
+   *
+   * THE DESIGN DECISION IT ENCODES, which took a bug to get right:
+   *
+   *   The clock starts when the CALLER STOPS TALKING and is never reset by
+   *   internal progress. An earlier version restarted it on every tool call,
+   *   so a request that made four quick calls stayed silent the whole way -
+   *   each step was individually fast, and the caller heard nothing for eight
+   *   seconds and assumed the line had dropped.
+   *
+   *   Silence is measured from the person's point of view, not the system's.
+   *
+   * Returns { start, stop, noteStep } - noteStep tells it which tool is
+   * running so the line can be specific and, more importantly, TRUE. A filler
+   * claiming to check invoices while the model is planning is a small lie the
+   * customer cannot detect but the transcript records.
+   */
+  makeFillerClock(generation) {
     let fillerTimer = null;
     let repeatTimer = null;
-    let fillerCount = 0;
+    let count = 0;
     let currentStep = null;
 
-    const clearFillers = () => {
+    const stop = () => {
       clearTimeout(fillerTimer);
       clearInterval(repeatTimer);
     };
 
-    // Say something only if the work is actually taking a while.
-    const startFiller = () => {
-      clearFillers();
+    const start = () => {
+      stop();
       fillerTimer = setTimeout(() => {
-        const toolName = currentStep;
         if (!this.isCurrent(generation)) return;
-        // A named tool gets a specific line; general thinking gets a neutral
-        // one. Both are TRUE, which is the property that matters - a filler
-        // that claims to be checking invoices while the model is planning is
-        // a small lie the customer cannot detect but the transcript records.
-        const text = toolName
-          ? TOOL_FILLERS[toolName] ?? "One moment while I look into that."
+
+        const text = currentStep
+          ? TOOL_FILLERS[currentStep] ?? "One moment while I look into that."
           : "Let me look into that for you.";
         this.emit("speak", { text, generation, kind: "filler" });
-        fillerCount += 1;
+        count += 1;
 
         repeatTimer = setInterval(() => {
-          if (!this.isCurrent(generation)) return clearFillers();
+          if (!this.isCurrent(generation)) return stop();
 
-          if (fillerCount > MAX_FILLERS) {
+          if (count > MAX_FILLERS) {
             this.emit("speak", {
               text: FILLER_GIVING_UP,
               generation,
               kind: "filler_final",
             });
-            return clearFillers();
+            return stop();
           }
 
-          const next = WAITING_LONGER[Math.min(fillerCount - 1, WAITING_LONGER.length - 1)];
+          const next = WAITING_LONGER[Math.min(count - 1, WAITING_LONGER.length - 1)];
           this.emit("speak", { text: next, generation, kind: "filler" });
-          fillerCount += 1;
+          count += 1;
         }, FILLER_REPEAT_MS);
       }, FILLER_DELAY_MS);
     };
 
+    return { start, stop, noteStep: (tool) => (currentStep = tool) };
+  }
+
+  async runTurn(transcript, generation) {
+    const filler = this.makeFillerClock(generation);
+    const clearFillers = filler.stop;
+
     // Start the clock the moment the caller stops talking. ONE timer for the
     // whole turn, never reset by internal progress.
-    startFiller();
+    filler.start();
 
     try {
       const result = await runAgent(transcript, {
@@ -455,8 +479,7 @@ class VoiceSession {
           //
           // Tool events now only update WHAT we would say, not WHETHER the
           // clock is running.
-          if (e.type === "tool_call") currentStep = e.tool;
-          else if (e.type === "thinking") currentStep = currentStep ?? null;
+          if (e.type === "tool_call") filler.noteStep(e.tool);
           this.forwardAgentEvent(e, generation);
         },
       });
