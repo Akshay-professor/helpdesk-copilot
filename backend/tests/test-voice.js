@@ -29,9 +29,9 @@ const {
   needsRewrite,
   speakMoney,
   formatForSpeech,
-} = require("./src/voice/speechFormat");
-const { interpretConfirmation, speakConfirmation } = require("./src/voice/voiceSession");
-const { isConfigured, MIN_AUDIO_BYTES } = require("./src/voice/stt");
+} = require("../src/voice/speechFormat");
+const { interpretConfirmation, speakConfirmation } = require("../src/voice/voiceSession");
+const { isConfigured, MIN_AUDIO_BYTES } = require("../src/voice/stt");
 
 const WS_URL = process.env.VOICE_WS_URL || "ws://localhost:5000/voice";
 

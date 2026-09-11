@@ -22,7 +22,7 @@
  *   node test-router-patterns.js
  */
 
-const { routeByPattern } = require("./src/agent/router");
+const { routeByPattern } = require("../src/agent/router");
 
 let pass = 0;
 const failures = [];

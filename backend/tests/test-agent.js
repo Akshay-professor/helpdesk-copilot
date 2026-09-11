@@ -8,8 +8,8 @@
  */
 
 require("dotenv").config();
-const { runAgent } = require("./src/agent/agentRunner");
-const { executeTool } = require("./src/tools/toolRegistry");
+const { runAgent } = require("../src/agent/agentRunner");
+const { executeTool } = require("../src/tools/toolRegistry");
 
 function line(title) {
   console.log("\n" + "=".repeat(64));

@@ -13,8 +13,8 @@
  */
 require("dotenv").config();
 
-const { buildBrief } = require("./src/agents/coordinator");
-const { SPECIALISTS } = require("./src/agents/specialists");
+const { buildBrief } = require("../src/agents/coordinator");
+const { SPECIALISTS } = require("../src/agents/specialists");
 
 let pass = 0, fail = 0;
 const check = (l, ok) => { console.log(`  ${ok ? "PASS" : "FAIL"}  ${l}`); ok ? pass++ : fail++; };

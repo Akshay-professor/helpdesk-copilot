@@ -13,14 +13,14 @@
  */
 
 require("dotenv").config();
-const { connectRedis, disconnectRedis, isReady } = require("./src/cache/redis");
+const { connectRedis, disconnectRedis, isReady } = require("../src/cache/redis");
 const {
   checkRateLimit,
   recordTokens,
   getUsage,
   resetLimits,
   LIMITS,
-} = require("./src/cache/rateLimit");
+} = require("../src/cache/rateLimit");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 

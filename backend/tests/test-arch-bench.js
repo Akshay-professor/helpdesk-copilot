@@ -32,10 +32,10 @@
 
 require("dotenv").config();
 
-const { connectDB } = require("./src/db/connection");
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runAgent } = require("./src/agent/agentRunner");
-const { runCoordinator } = require("./src/agents/coordinator");
+const { connectDB } = require("../src/db/connection");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runAgent } = require("../src/agent/agentRunner");
+const { runCoordinator } = require("../src/agents/coordinator");
 
 const REPEATS = Number(process.env.BENCH_REPEATS ?? 3);
 

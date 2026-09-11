@@ -10,15 +10,15 @@
  * changePlan tool. The question is what actually happens - not what we hope.
  */
 require("dotenv").config();
-const { connectDB } = require("./src/db/connection");
+const { connectDB } = require("../src/db/connection");
 // Connect the KB too. Forgetting this made every policy question in an
 // earlier benchmark run return "knowledge_base_unavailable" - the product
 // was fine, the HARNESS was lying. A measurement that quietly degrades the
 // thing it measures is worse than no measurement.
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runAgent } = require("./src/agent/agentRunner");
-const { getSpecialist } = require("./src/agents/specialists");
-const repo = require("./src/data/repository");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runAgent } = require("../src/agent/agentRunner");
+const { getSpecialist } = require("../src/agents/specialists");
+const repo = require("../src/data/repository");
 
 async function ask(specName, message, callerId) {
   const spec = getSpecialist(specName);

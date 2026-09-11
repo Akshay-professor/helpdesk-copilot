@@ -12,14 +12,14 @@
  * what goes in the analysis.
  */
 require("dotenv").config();
-const { connectDB } = require("./src/db/connection");
+const { connectDB } = require("../src/db/connection");
 // Connect the KB too. Forgetting this made every policy question in an
 // earlier benchmark run return "knowledge_base_unavailable" - the product
 // was fine, the HARNESS was lying. A measurement that quietly degrades the
 // thing it measures is worse than no measurement.
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runAgent } = require("./src/agent/agentRunner");
-const { runCoordinator } = require("./src/agents/coordinator");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runAgent } = require("../src/agent/agentRunner");
+const { runCoordinator } = require("../src/agents/coordinator");
 
 const CASES = [
   { label: "trivial lookup",   msg: "where is order ord_1001?" },

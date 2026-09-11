@@ -27,8 +27,8 @@
 
 require("dotenv").config();
 
-const { connectDB } = require("./src/db/connection");
-const { routeRequest } = require("./src/agent/router");
+const { connectDB } = require("../src/db/connection");
+const { routeRequest } = require("../src/agent/router");
 
 // ---------------------------------------------------------------------------
 // Histories - the second half of every routing decision

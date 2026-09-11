@@ -12,12 +12,12 @@
  */
 
 require("dotenv").config();
-const { connectDB, disconnectDB } = require("./src/db/connection");
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runAgent } = require("./src/agent/agentRunner");
-const { classifyRequest, shouldReplan } = require("./src/agent/planner");
-const { getToolDefinitions } = require("./src/tools/toolRegistry");
-const { AgentRun } = require("./src/db/models");
+const { connectDB, disconnectDB } = require("../src/db/connection");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runAgent } = require("../src/agent/agentRunner");
+const { classifyRequest, shouldReplan } = require("../src/agent/planner");
+const { getToolDefinitions } = require("../src/tools/toolRegistry");
+const { AgentRun } = require("../src/db/models");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 

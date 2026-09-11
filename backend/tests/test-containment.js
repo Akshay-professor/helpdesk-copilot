@@ -49,8 +49,8 @@
 
 require("dotenv").config();
 
-const { connectDB } = require("./src/db/connection");
-const { connectVectorStore } = require("./src/rag/vectorStore");
+const { connectDB } = require("../src/db/connection");
+const { connectVectorStore } = require("../src/rag/vectorStore");
 
 (async () => {
   await connectDB();
@@ -59,7 +59,7 @@ const { connectVectorStore } = require("./src/rag/vectorStore");
   // ---- Inject BEFORE requiring the coordinator --------------------------
   //
   // Order matters, for the reason in the header. Patch first, require second.
-  const runner = require("./src/agent/agentRunner");
+  const runner = require("../src/agent/agentRunner");
 
   runner.runAgent = async (brief, opts = {}) => {
     if (opts.specialist === "account") {
@@ -75,7 +75,7 @@ const { connectVectorStore } = require("./src/rag/vectorStore");
     };
   };
 
-  const coordinator = require("./src/agents/coordinator");
+  const coordinator = require("../src/agents/coordinator");
 
   // The routing decision is pinned rather than asked for, so the provider
   // cannot change what this test exercises.

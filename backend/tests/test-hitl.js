@@ -15,12 +15,12 @@
  */
 
 require("dotenv").config();
-const { connectDB, disconnectDB } = require("./src/db/connection");
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runAgent, resumeAgent } = require("./src/agent/agentRunner");
-const { listPending, getPending, claimRun, releaseRun } = require("./src/agent/approvals");
-const { AgentRun } = require("./src/db/models");
-const repo = require("./src/data/repository");
+const { connectDB, disconnectDB } = require("../src/db/connection");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runAgent, resumeAgent } = require("../src/agent/agentRunner");
+const { listPending, getPending, claimRun, releaseRun } = require("../src/agent/approvals");
+const { AgentRun } = require("../src/db/models");
+const repo = require("../src/data/repository");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 const refunded = async (id) => (await repo.findOrderById(id)).refundedAmount;

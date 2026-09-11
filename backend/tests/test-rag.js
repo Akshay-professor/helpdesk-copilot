@@ -10,11 +10,11 @@
  */
 
 require("dotenv").config();
-const { connectDB, disconnectDB } = require("./src/db/connection");
-const { connectVectorStore, search } = require("./src/rag/vectorStore");
-const { executeTool } = require("./src/tools/toolRegistry");
-const { runAgent } = require("./src/agent/agentRunner");
-const { DOCUMENTS } = require("./src/data/knowledgeBase");
+const { connectDB, disconnectDB } = require("../src/db/connection");
+const { connectVectorStore, search } = require("../src/rag/vectorStore");
+const { executeTool } = require("../src/tools/toolRegistry");
+const { runAgent } = require("../src/agent/agentRunner");
+const { DOCUMENTS } = require("../src/data/knowledgeBase");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 

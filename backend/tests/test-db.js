@@ -14,10 +14,10 @@
  */
 
 require("dotenv").config();
-const { connectDB, disconnectDB, isConnected } = require("./src/db/connection");
-const { runAgent, resumeAgent } = require("./src/agent/agentRunner");
-const { loadRun, listRuns } = require("./src/db/persistence");
-const { Order, Refund, AgentRun, ToolCall } = require("./src/db/models");
+const { connectDB, disconnectDB, isConnected } = require("../src/db/connection");
+const { runAgent, resumeAgent } = require("../src/agent/agentRunner");
+const { loadRun, listRuns } = require("../src/db/persistence");
+const { Order, Refund, AgentRun, ToolCall } = require("../src/db/models");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 

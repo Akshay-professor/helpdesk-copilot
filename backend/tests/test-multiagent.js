@@ -16,16 +16,16 @@
 
 require("dotenv").config();
 
-const { connectDB } = require("./src/db/connection");
-const vectorStore = require("./src/rag/vectorStore");
-const { SPECIALISTS, getSpecialist } = require("./src/agents/specialists");
+const { connectDB } = require("../src/db/connection");
+const vectorStore = require("../src/rag/vectorStore");
+const { SPECIALISTS, getSpecialist } = require("../src/agents/specialists");
 const {
   decideDelegation,
   buildBrief,
   MAX_DELEGATIONS,
-} = require("./src/agents/coordinator");
-const { runCoordinator } = require("./src/agents/coordinator");
-const { getToolDefinitions } = require("./src/tools/toolRegistry");
+} = require("../src/agents/coordinator");
+const { runCoordinator } = require("../src/agents/coordinator");
+const { getToolDefinitions } = require("../src/tools/toolRegistry");
 
 let pass = 0;
 let fail = 0;
@@ -243,7 +243,7 @@ async function testCap() {
 
   // The coordinator's parser must refuse to return more than 2 specialists
   // even if the model asks for five. Prompt says so; code enforces it.
-  const { decideDelegation: _d } = require("./src/agents/coordinator");
+  const { decideDelegation: _d } = require("../src/agents/coordinator");
   const d = await _d(
     "refund me, fix my delivery, change my plan, and tell me about churn trends"
   );

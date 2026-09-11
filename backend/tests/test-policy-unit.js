@@ -19,7 +19,7 @@
  *   node test-policy-unit.js
  */
 
-const { checkRefundAmount, checkCreditAmount, LIMITS, TIER } = require("./src/policy/policy");
+const { checkRefundAmount, checkCreditAmount, LIMITS, TIER } = require("../src/policy/policy");
 
 let pass = 0;
 const failures = [];

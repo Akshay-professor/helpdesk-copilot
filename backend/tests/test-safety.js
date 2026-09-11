@@ -13,11 +13,11 @@
  */
 
 require("dotenv").config();
-const { executeTool, TOOLS } = require("./src/tools/toolRegistry");
-const { checkRefundAmount, checkCreditAmount } = require("./src/policy/policy");
-const { runAgent, MAX_ITERATIONS } = require("./src/agent/agentRunner");
-const repo = require("./src/data/repository");
-const { connectDB, disconnectDB } = require("./src/db/connection");
+const { executeTool, TOOLS } = require("../src/tools/toolRegistry");
+const { checkRefundAmount, checkCreditAmount } = require("../src/policy/policy");
+const { runAgent, MAX_ITERATIONS } = require("../src/agent/agentRunner");
+const repo = require("../src/data/repository");
+const { connectDB, disconnectDB } = require("../src/db/connection");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 const run = async (label, name, args) => {

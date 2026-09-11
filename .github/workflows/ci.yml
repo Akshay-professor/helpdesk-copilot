@@ -56,8 +56,8 @@ jobs:
 
       - name: Policy limits (pure functions, no LLM, no database)
         working-directory: backend
-        run: node test-policy-unit.js
+        run: node tests/test-policy-unit.js
 
       - name: Routing patterns (regex stage only, no classifier)
         working-directory: backend
-        run: node test-router-patterns.js
+        run: node tests/test-router-patterns.js

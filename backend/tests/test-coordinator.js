@@ -4,13 +4,13 @@
  * End-to-end through the coordinator, on the assignment's own hard example.
  */
 require("dotenv").config();
-const { connectDB } = require("./src/db/connection");
+const { connectDB } = require("../src/db/connection");
 // Connect the KB too. Forgetting this made every policy question in an
 // earlier benchmark run return "knowledge_base_unavailable" - the product
 // was fine, the HARNESS was lying. A measurement that quietly degrades the
 // thing it measures is worse than no measurement.
-const { connectVectorStore } = require("./src/rag/vectorStore");
-const { runCoordinator } = require("./src/agents/coordinator");
+const { connectVectorStore } = require("../src/rag/vectorStore");
+const { runCoordinator } = require("../src/agents/coordinator");
 
 (async () => {
   await connectDB();

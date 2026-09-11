@@ -25,16 +25,16 @@
 
 require("dotenv").config();
 
-const { connectDB, disconnectDB } = require("./src/db/connection");
-const { connectVectorStore } = require("./src/rag/vectorStore");
+const { connectDB, disconnectDB } = require("../src/db/connection");
+const { connectVectorStore } = require("../src/rag/vectorStore");
 const {
   runResearch,
   getReport,
   decompose,
   investigate,
   assessConfidence,
-} = require("./src/research/researchAgent");
-const { runSource, describeSources } = require("./src/research/sources");
+} = require("../src/research/researchAgent");
+const { runSource, describeSources } = require("../src/research/sources");
 
 let failures = 0;
 const check = (label, pass, detail = "") => {

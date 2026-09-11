@@ -10,9 +10,9 @@
  */
 
 require("dotenv").config();
-const { runAgent, resumeAgent } = require("./src/agent/agentRunner");
-const repo = require("./src/data/repository");
-const { connectDB, disconnectDB } = require("./src/db/connection");
+const { runAgent, resumeAgent } = require("../src/agent/agentRunner");
+const repo = require("../src/data/repository");
+const { connectDB, disconnectDB } = require("../src/db/connection");
 
 const line = (t) => console.log("\n" + "=".repeat(70) + "\n" + t + "\n" + "=".repeat(70));
 const traceOf = (r) =>

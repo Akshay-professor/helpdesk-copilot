@@ -9,7 +9,7 @@
  */
 
 require("dotenv").config();
-const { callLLM } = require("./src/llm/llmClient");
+const { callLLM } = require("../src/llm/llmClient");
 
 async function main() {
   console.log("Calling Mistral...\n");

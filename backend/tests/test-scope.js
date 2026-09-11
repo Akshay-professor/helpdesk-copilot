@@ -47,9 +47,9 @@
 
 require("dotenv").config();
 
-const { routeByPattern, SCOPE_REFUSAL } = require("./src/agent/router");
-const { connectDB, disconnectDB } = require("./src/db/connection");
-const { runAgent } = require("./src/agent/agentRunner");
+const { routeByPattern, SCOPE_REFUSAL } = require("../src/agent/router");
+const { connectDB, disconnectDB } = require("../src/db/connection");
+const { runAgent } = require("../src/agent/agentRunner");
 
 // ---------------------------------------------------------------------------
 // Must be BLOCKED - not our business
