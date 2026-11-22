@@ -233,6 +233,48 @@ const REFUNDS = [];
 /** @type {Array<{id:string, reason:string, priority:string, createdAt:string, status:string}>} */
 const ESCALATIONS = [];
 
+// ---------------------------------------------------------------------------
+// Technical specialist data: system status and service logs
+// ---------------------------------------------------------------------------
+//
+// The Technical agent's two tools read these. They are the operational side of
+// the business - what the platform was doing - rather than customer records,
+// so they are read-only fixtures, not Mongo collections.
+// ponytail: static fixtures; swap for a status-page API and a log store
+// (Loki, CloudWatch) when there is a real platform behind this.
+
+const SYSTEM_STATUS = [
+  { component: "checkout", status: "operational", note: null },
+  {
+    component: "payments",
+    status: "degraded",
+    note:
+      "Gateway timeouts on ~2% of card charges. Retries can double-charge " +
+      "when the first attempt settles late. Fix deploying.",
+    since: daysAgo(14),
+  },
+  {
+    component: "shipping-tracking",
+    status: "degraded",
+    note: "Carrier tracking updates delayed up to 48 hours.",
+    since: daysAgo(4),
+  },
+  { component: "accounts", status: "operational", note: null },
+  { component: "email", status: "operational", note: null },
+];
+
+// Per-customer service log lines. Deliberately tied to the seeded records, so
+// "why was I charged twice?" has a root cause the agent can actually find:
+// inv_5003's note and these lines tell the same story from two sides.
+const SERVICE_LOGS = [
+  { at: daysAgo(14), customerId: "cus_001", service: "payments", level: "error", ref: "ord_1001", message: "Charge attempt 1 for ord_1001: gateway timeout after 30s." },
+  { at: daysAgo(14), customerId: "cus_001", service: "payments", level: "info", ref: "ord_1001", message: "Charge attempt 2 for ord_1001 succeeded ($240.00, inv_5003)." },
+  { at: daysAgo(14), customerId: "cus_001", service: "payments", level: "warn", ref: "ord_1001", message: "Late settlement: attempt 1 for ord_1001 settled after retry ($240.00, inv_5002)." },
+  { at: daysAgo(3), customerId: "cus_002", service: "shipping-tracking", level: "info", ref: "ord_2001", message: "Label created for ord_2001; handed to carrier." },
+  { at: daysAgo(1), customerId: "cus_002", service: "shipping-tracking", level: "warn", ref: "ord_2001", message: "No carrier scan for ord_2001 in 48h (known carrier delay)." },
+  { at: daysAgo(2), customerId: "cus_003", service: "accounts", level: "warn", ref: null, message: "3 failed sign-in attempts; account temporarily locked for 15 minutes." },
+];
+
 module.exports = {
   CUSTOMERS,
   ORDERS,
@@ -240,5 +282,7 @@ module.exports = {
   REFUND_POLICY,
   REFUNDS,
   ESCALATIONS,
+  SYSTEM_STATUS,
+  SERVICE_LOGS,
   daysAgo,
 };

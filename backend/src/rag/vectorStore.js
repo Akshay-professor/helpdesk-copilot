@@ -21,9 +21,15 @@ const { ChromaClient } = require("chromadb");
 const { embeddingFunction } = require("./embeddings");
 
 const COLLECTION_NAME = "helpdesk_kb";
+// Past support tickets live in their OWN collection, not as a KB category.
+// The KB is policy the support agent may cite; a ticket is one customer's
+// complaint. Mixing them would let the agent cite "a customer said refunds
+// take a day" as policy. Only the research agent reads this one.
+const TICKETS_COLLECTION = "helpdesk_tickets";
 
 let client = null;
 let collection = null;
+let tickets = null;
 let available = false;
 
 /** Is the knowledge base usable right now? */
@@ -58,6 +64,11 @@ async function connectVectorStore(url = process.env.CHROMA_URL) {
       // their magnitudes differ wildly.
       metadata: { "hnsw:space": "cosine" },
     });
+    tickets = await client.getOrCreateCollection({
+      name: TICKETS_COLLECTION,
+      embeddingFunction,
+      metadata: { "hnsw:space": "cosine" },
+    });
 
     available = true;
     console.log("[rag] connected to ChromaDB");
@@ -79,32 +90,53 @@ async function connectVectorStore(url = process.env.CHROMA_URL) {
  * @param {Array<{id,title,category,text}>} documents
  */
 async function indexDocuments(documents) {
+  collection = await rebuild(COLLECTION_NAME, documents, (d) => ({
+    title: d.title,
+    category: d.category,
+  }));
+  return documents.length;
+}
+
+/**
+ * Load past support tickets into their own collection, replacing what was there.
+ *
+ * @param {Array<{id,subject,plan,quarter,category,outcome,text}>} rows
+ */
+async function indexTickets(rows) {
+  tickets = await rebuild(
+    TICKETS_COLLECTION,
+    rows.map((t) => ({ ...t, title: t.subject })),
+    (t) => ({ title: t.subject, plan: t.plan, quarter: t.quarter, category: t.category, outcome: t.outcome })
+  );
+  return rows.length;
+}
+
+async function rebuild(name, docs, metaFor) {
   if (!isAvailable()) throw new Error("ChromaDB is not available.");
 
   // Wipe and rebuild rather than upsert. Re-indexing is cheap at this size,
-  // and it guarantees a document deleted from knowledgeBase.js actually
-  // disappears from search - an upsert would leave it behind forever.
+  // and it guarantees a document deleted from the source actually disappears
+  // from search - an upsert would leave it behind forever.
   try {
-    await client.deleteCollection({ name: COLLECTION_NAME });
+    await client.deleteCollection({ name });
   } catch {
     // Collection did not exist. Fine.
   }
 
-  collection = await client.getOrCreateCollection({
-    name: COLLECTION_NAME,
+  const col = await client.getOrCreateCollection({
+    name,
     embeddingFunction,
     metadata: { "hnsw:space": "cosine" },
   });
 
   // One batched call rather than one per document: embedding APIs charge and
-  // rate-limit per request, and 12 round trips for 12 documents is wasteful.
-  await collection.add({
-    ids: documents.map((d) => d.id),
-    documents: documents.map((d) => `${d.title}\n\n${d.text}`),
-    metadatas: documents.map((d) => ({ title: d.title, category: d.category })),
+  // rate-limit per request.
+  await col.add({
+    ids: docs.map((d) => d.id),
+    documents: docs.map((d) => `${d.title}\n\n${d.text}`),
+    metadatas: docs.map(metaFor),
   });
-
-  return documents.length;
+  return col;
 }
 
 /**
@@ -137,33 +169,49 @@ async function search(query, limit = 3, options = {}) {
           : { category: { "$in": categories } }
         : undefined;
 
-    const res = await collection.query({
-      queryTexts: [query],
-      nResults: limit,
-      ...(where && { where }),
-    });
-
-    const ids = res.ids?.[0] ?? [];
-    const docs = res.documents?.[0] ?? [];
-    const metas = res.metadatas?.[0] ?? [];
-    const distances = res.distances?.[0] ?? [];
-
-    return {
-      available: true,
-      results: ids.map((id, i) => ({
-        id,
-        title: metas[i]?.title ?? id,
-        category: metas[i]?.category,
-        text: docs[i],
-        // Chroma returns cosine DISTANCE (0 = identical). Flip it to a
-        // similarity score, which is what a human reading a trace expects.
-        score: Number((1 - (distances[i] ?? 1)).toFixed(3)),
-      })),
-    };
+    return { available: true, results: await queryCollection(collection, query, limit, where) };
   } catch (err) {
     console.error("[rag] search failed:", err.message);
     return { available: false, results: [] };
   }
+}
+
+/**
+ * Search past support tickets by meaning. Research agent only.
+ *
+ * @returns {Promise<{available:boolean, results:Array}>}
+ */
+async function searchTickets(query, limit = 5) {
+  if (!isAvailable() || !tickets) return { available: false, results: [] };
+  try {
+    return { available: true, results: await queryCollection(tickets, query, limit) };
+  } catch (err) {
+    console.error("[rag] ticket search failed:", err.message);
+    return { available: false, results: [] };
+  }
+}
+
+async function queryCollection(col, query, limit, where) {
+  const res = await col.query({
+    queryTexts: [query],
+    nResults: limit,
+    ...(where && { where }),
+  });
+
+  const ids = res.ids?.[0] ?? [];
+  const docs = res.documents?.[0] ?? [];
+  const metas = res.metadatas?.[0] ?? [];
+  const distances = res.distances?.[0] ?? [];
+
+  return ids.map((id, i) => ({
+    id,
+    ...metas[i],
+    title: metas[i]?.title ?? id,
+    text: docs[i],
+    // Chroma returns cosine DISTANCE (0 = identical). Flip it to a
+    // similarity score, which is what a human reading a trace expects.
+    score: Number((1 - (distances[i] ?? 1)).toFixed(3)),
+  }));
 }
 
 /** Document count, for diagnostics. */
@@ -179,8 +227,11 @@ async function count() {
 module.exports = {
   connectVectorStore,
   indexDocuments,
+  indexTickets,
   search,
+  searchTickets,
   count,
   isAvailable,
   COLLECTION_NAME,
+  TICKETS_COLLECTION,
 };

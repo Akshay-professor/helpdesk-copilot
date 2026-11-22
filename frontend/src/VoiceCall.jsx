@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { getVoiceToken } from "./api";
 
 /**
  * VoiceCall
@@ -179,8 +180,18 @@ export default function VoiceCall({ active = true }) {
     };
     tick();
 
-    // 3. The socket.
-    const ws = new WebSocket(WS_URL);
+    // 3. The socket. The JWT rides in the subprotocol list - the one header a
+    //    browser lets you set on a WebSocket - never in the URL.
+    let token;
+    try {
+      token = await getVoiceToken();
+    } catch {
+      hangUp();
+      setError("Could not reach the voice server. Is the backend running?");
+      setStatus("idle");
+      return;
+    }
+    const ws = new WebSocket(WS_URL, ["helpdesk.v1", token]);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 

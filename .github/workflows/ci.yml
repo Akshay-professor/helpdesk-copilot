@@ -61,3 +61,19 @@ jobs:
       - name: Routing patterns (regex stage only, no classifier)
         working-directory: backend
         run: node tests/test-router-patterns.js
+
+      - name: JWT sign/verify (alg none, tampering, expiry)
+        working-directory: backend
+        run: node src/auth/jwt.js
+
+      - name: Voice WebSocket auth (token in Sec-WebSocket-Protocol)
+        working-directory: backend
+        run: node tests/test-voice-auth.js
+
+      - name: Technical specialist tools (status, logs, isolation)
+        working-directory: backend
+        run: node tests/test-technical-tools.js
+
+      - name: Speech rewrite cache (TTS response caching)
+        working-directory: backend
+        run: node tests/test-speech-cache.js

@@ -50,6 +50,7 @@
 const repo = require("../data/repository");
 const { ROUTES, WORKFLOWS } = require("../constants");
 const { classifyIntent, isConfigured } = require("./intentClassifier");
+const { getToolDefinitions } = require("../tools/toolRegistry");
 
 // ---------------------------------------------------------------------------
 // Route definitions
@@ -468,7 +469,7 @@ async function routeRequest(message, options = {}) {
             tools: GUIDED_TOOLSETS[i.category],
             reason:
               `Intent classified as ${i.label} in ${i.latencyMs}ms. ` +
-              `Restricted to ${GUIDED_TOOLSETS[i.category].length} of 9 tools.`,
+              `Restricted to ${GUIDED_TOOLSETS[i.category].length} of ${getToolDefinitions().length} tools.`,
             stage: "classifier",
             classifier: { label: i.label, latencyMs: i.latencyMs, tokens: i.tokens },
           };

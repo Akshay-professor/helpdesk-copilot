@@ -128,6 +128,16 @@ export async function confirmAction(state, approved, options = {}) {
   return response.json();
 }
 
+/**
+ * A 60-second JWT for the voice WebSocket. It travels in the
+ * Sec-WebSocket-Protocol header, never the URL - see backend voiceServer.js.
+ */
+export async function getVoiceToken() {
+  const r = await fetch("/api/voice/token", { method: "POST" });
+  if (!r.ok) throw new Error("Could not get a voice token");
+  return (await r.json()).token;
+}
+
 /** Backend health, including whether Mongo and Chroma are reachable. */
 export async function getHealth() {
   const r = await fetch("/api/health");

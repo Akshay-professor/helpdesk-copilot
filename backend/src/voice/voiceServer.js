@@ -25,13 +25,14 @@
  * THE JWT GOES IN THE HEADER, NOT THE URL
  * ---------------------------------------------------------------------------
  *
- * > "Voice: WebSocket, JWT in the header (not the URL - URLs land in access
- * >  logs)"
+ * > "Voice: WebSocket, JWT in the Sec-WebSocket-Protocol header (not the URL -
+ * >  credentials in URLs land in access logs)"
  *
  * This is a small requirement with a large lesson.
  *
- *     ws://api/voice?token=eyJhbGciOi...     <- WRONG
- *     Authorization: Bearer eyJhbGciOi...    <- RIGHT
+ *     ws://api/voice?token=eyJhbGciOi...             <- WRONG
+ *     Sec-WebSocket-Protocol: helpdesk.v1, eyJhbG... <- RIGHT (browser)
+ *     Authorization: Bearer eyJhbGciOi...            <- RIGHT (server-side)
  *
  * A URL is not a secret channel. It is written to the server's access log,
  * every proxy and load balancer in between, the browser's history, and the
@@ -66,34 +67,46 @@
 const { WebSocketServer } = require("ws");
 const { VoiceSession } = require("./voiceSession");
 const { isConfigured } = require("./stt");
+const { verify } = require("../auth/jwt");
 
 /**
- * Read the caller's identity from the HANDSHAKE HEADERS.
+ * Read the caller's identity from the HANDSHAKE HEADERS - never the URL.
  *
- * This project has no real auth yet - Phase 10b established `x-customer-id` as
- * a stand-in and was explicit that it is a stand-in, not a solution. What
- * matters architecturally is WHERE the credential is read from, because that
- * is the part a real JWT would inherit unchanged.
+ * A browser cannot set Authorization on `new WebSocket()`, but it CAN set the
+ * subprotocol list, which arrives as the Sec-WebSocket-Protocol header. So the
+ * page calls `new WebSocket(url, ["helpdesk.v1", token])`, where `token` is a
+ * 60-second JWT from POST /voice/token. The server answers with
+ * "helpdesk.v1" only - echoing the token back would put it in a response
+ * header for no reason.
  *
- * Note browsers cannot set custom headers on `new WebSocket()`. Real systems
- * solve this with a short-lived ticket: the page fetches a one-time token over
- * HTTPS, then connects. We accept the header (correct for server-to-server and
- * for our tests) and fall back to a first-message handshake for browsers -
- * never to the query string.
+ * Authorization: Bearer <jwt> is accepted too, for server-side clients (tests).
+ * Both carry a signed JWT; the old raw-caller-id bearer is gone.
+ *
+ * @returns {{callerId, via}} or {error} for a credential that is PRESENT but
+ *          invalid. A bad token is rejected outright - silently downgrading it
+ *          to anonymous would hide an attack or a bug.
  */
+const SUBPROTOCOL = "helpdesk.v1";
+
 function identify(req) {
+  const offered = String(req.headers["sec-websocket-protocol"] ?? "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const fromProtocol = offered.find((p) => p !== SUBPROTOCOL);
+
   const auth = req.headers["authorization"];
-  if (auth?.startsWith("Bearer ")) {
-    const token = auth.slice(7).trim();
-    // A real implementation verifies a signature here. Ours reads the subject
-    // directly, and says so rather than pretending otherwise.
-    return { callerId: token || null, via: "authorization-header" };
-  }
+  const fromHeader = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
 
-  const direct = req.headers["x-customer-id"];
-  if (direct) return { callerId: String(direct), via: "x-customer-id-header" };
+  const token = fromProtocol ?? fromHeader;
+  if (!token) return { callerId: null, via: "anonymous" };
 
-  return { callerId: null, via: "anonymous" };
+  const claims = verify(token);
+  if (!claims) return { error: "invalid_token" };
+  return {
+    callerId: claims.sub ?? null,
+    via: fromProtocol ? "sec-websocket-protocol" : "authorization-header",
+  };
 }
 
 /**
@@ -104,7 +117,15 @@ function identify(req) {
  * same-origin rules work in our favour instead of needing to be worked around.
  */
 function attachVoiceServer(httpServer, { path = "/voice" } = {}) {
-  const wss = new WebSocketServer({ server: httpServer, path });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path,
+    // Reject a bad token during the HANDSHAKE, before a session exists.
+    verifyClient: ({ req }, done) =>
+      identify(req).error ? done(false, 401, "Invalid or expired token") : done(true),
+    // Select our protocol name, never the token.
+    handleProtocols: (protocols) => (protocols.has(SUBPROTOCOL) ? SUBPROTOCOL : false),
+  });
 
   wss.on("connection", (ws, req) => {
     const { callerId, via } = identify(req);

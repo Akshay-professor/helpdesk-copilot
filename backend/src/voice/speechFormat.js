@@ -262,6 +262,53 @@ RULES:
 
 Return ONLY the spoken version. No preamble, no quotes around it.`;
 
+// ---------------------------------------------------------------------------
+// TTS response cache
+// ---------------------------------------------------------------------------
+//
+// The assignment asks for "TTS response caching for repeated phrases". Our
+// synthesis is the browser's own speechSynthesis - free and ~50ms - so there
+// is no audio to cache. The expensive, cacheable step of OUR speech pipeline
+// is this rewrite: an LLM call (~1s, a few hundred tokens) that turns the same
+// answer into the same spoken text every time. Workflow replies, policy
+// answers and confirmations repeat constantly, so we cache by exact text.
+//
+// Redis first (shared across server instances, 24h TTL), a small in-process
+// Map when Redis is down. Losing the cache costs one LLM call, never a wrong
+// answer, so it fails open.
+// ponytail: exact-text keys only; normalise whitespace/IDs if hit rate is low.
+
+const crypto = require("node:crypto");
+const { isReady: redisReady, getClient: redisClient } = require("../cache/redis");
+
+const SPEECH_CACHE_TTL_S = 24 * 60 * 60;
+const LOCAL_MAX = 500;
+const local = new Map();
+const cacheStats = { hits: 0, misses: 0 };
+
+const cacheKey = (text) =>
+  "tts:" + crypto.createHash("sha256").update(text).digest("hex");
+
+async function cacheGet(key) {
+  if (redisReady()) {
+    try {
+      const hit = await redisClient().get(key);
+      if (hit) return hit;
+    } catch { /* fall through to local */ }
+  }
+  return local.get(key) ?? null;
+}
+
+async function cacheSet(key, value) {
+  if (local.size >= LOCAL_MAX) local.delete(local.keys().next().value); // oldest out
+  local.set(key, value);
+  if (redisReady()) {
+    try {
+      await redisClient().set(key, value, { EX: SPEECH_CACHE_TTL_S });
+    } catch { /* local copy still serves this instance */ }
+  }
+}
+
 /**
  * Rewrite an answer for speech.
  *
@@ -288,6 +335,21 @@ async function formatForSpeech(text, { model, force = false } = {}) {
     };
   }
 
+  const key = cacheKey(original);
+  const cached = await cacheGet(key);
+  if (cached) {
+    cacheStats.hits++;
+    return {
+      text: cached,
+      rewritten: true,
+      cached: true,
+      reason: assessment.reason,
+      estimatedSeconds: estimateSpeechSeconds(cached),
+      tokens: 0,
+    };
+  }
+  cacheStats.misses++;
+
   try {
     const reply = await callLLM({
       model,
@@ -303,6 +365,7 @@ async function formatForSpeech(text, { model, force = false } = {}) {
     const spoken = mechanicalPass(reply.content ?? "");
 
     if (!spoken.trim()) throw new Error("rewrite came back empty");
+    await cacheSet(key, spoken);
 
     return {
       text: spoken,
@@ -325,6 +388,7 @@ async function formatForSpeech(text, { model, force = false } = {}) {
 
 module.exports = {
   formatForSpeech,
+  cacheStats,
   mechanicalPass,
   needsRewrite,
   estimateSpeechSeconds,

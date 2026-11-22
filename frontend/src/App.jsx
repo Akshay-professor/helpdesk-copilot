@@ -7,6 +7,7 @@ import VoiceCall from "./VoiceCall";
 import ResearchPanel from "./ResearchPanel";
 import Markdown from "./Markdown";
 import CostDashboard from "./CostDashboard";
+import RunPanels from "./RunPanels";
 import { getApprovals } from "./api";
 
 /**
@@ -37,6 +38,9 @@ export default function App() {
   const [pending, setPending] = useState(null);
 
   const [trace, setTrace] = useState(null);
+  // The last result, for the plan / reflection panels (they need the final
+  // plan and the drafts, which only the result carries after a resume).
+  const [lastResult, setLastResult] = useState(null);
   const [stats, setStats] = useState({ tokensUsed: 0, iterations: 0, runId: null });
   const [health, setHealth] = useState(null);
 
@@ -80,6 +84,7 @@ export default function App() {
 
     setHistory(result.history ?? []);
     setTrace(result.trace ?? []);
+    setLastResult(result);
     setStats({
       tokensUsed: result.tokensUsed ?? 0,
       iterations: result.iterations ?? 0,
@@ -139,6 +144,7 @@ export default function App() {
     setInput("");
     setMessages((m) => [...m, { role: "user", text }]);
     setActivity([]);
+    setLastResult(null);
     setBusy(true);
     startedAt.current = Date.now();
 
@@ -329,6 +335,7 @@ export default function App() {
         </div>
 
         <div className="trace-pane">
+          <RunPanels events={activity} result={lastResult} />
           <TraceViewer
             trace={trace}
             tokensUsed={stats.tokensUsed}
@@ -395,6 +402,20 @@ function describe(e) {
     case "delegation_capped":
       return `delegation cap hit (${e.limit}) - answering with what we have`;
 
+    case "plan":
+      return e.progress
+        ? `step status: ${e.plan.filter((s) => s.status === "done").length}/${e.plan.length} done`
+        : `${e.revision ? `revised plan (v${e.revision})` : "plan"}: ${e.plan.length} steps`;
+    case "replanning":
+      return `replanning: ${e.reason}`;
+    case "reflecting":
+      return "checking the draft before sending";
+    case "reflection":
+      return e.verdict === "revise"
+        ? `draft rejected (${e.checkedBy}): ${e.failures.map((f) => f.criterion).join(", ")}`
+        : `draft passed (${e.checkedBy})`;
+    case "routed":
+      return `${e.route}${e.category ? ` / ${e.category}` : ""} · ${e.reason}`;
     case "thinking":
       return e.message;
     case "tool_call":

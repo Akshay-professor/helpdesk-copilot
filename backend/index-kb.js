@@ -8,8 +8,9 @@
  */
 
 require("dotenv").config();
-const { connectVectorStore, indexDocuments, search, count } = require("./src/rag/vectorStore");
+const { connectVectorStore, indexDocuments, indexTickets, search, count } = require("./src/rag/vectorStore");
 const { DOCUMENTS } = require("./src/data/knowledgeBase");
+const { TICKETS } = require("./src/data/tickets");
 
 async function main() {
   const ok = await connectVectorStore();
@@ -25,6 +26,11 @@ async function main() {
   console.log(`\nIndexing ${DOCUMENTS.length} documents (embedding via Mistral)...`);
   const n = await indexDocuments(DOCUMENTS);
   console.log(`Indexed ${n}. Collection now holds ${await count()}.`);
+
+  // Past tickets go in a SEPARATE collection: research reads them, the
+  // support agent cannot cite them as policy.
+  console.log(`Indexing ${TICKETS.length} past support tickets (research only)...`);
+  console.log(`Indexed ${await indexTickets(TICKETS)} tickets.`);
 
   // A smoke test proving semantic search actually works. Every query below is
   // phrased the way a CUSTOMER would ask - deliberately using none of the words

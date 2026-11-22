@@ -168,6 +168,8 @@ How to work:
     tools: [
       "getCustomer",
       "getOrders",
+      "getSystemStatus",
+      "lookupLogs",
       "searchKnowledgeBase",
       "escalateToHuman",
     ],
@@ -182,6 +184,9 @@ faulty items, tracking that has not updated, and problems using the site.
 How to work:
 - Get the facts first. Look up the order and its actual status before
   theorising about what went wrong.
+- Check system status before blaming the customer: a degraded component often
+  IS the cause. Read the customer's service logs to find the root cause, and
+  explain it in plain words - never paste log lines.
 - Distinguish "not yet arrived" from "lost". Check the shipping policy for the
   window before treating a late delivery as a lost package.
 - Give the customer one clear next step, not a list of things to try.

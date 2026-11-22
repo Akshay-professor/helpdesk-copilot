@@ -78,6 +78,8 @@ const TOOL_FILLERS = {
   searchKnowledgeBase: "Let me check our policy on that.",
   escalateToHuman: "Getting a colleague for you.",
   changePlan: "Looking at your plan options.",
+  getSystemStatus: "Checking whether anything's down on our side.",
+  lookupLogs: "Looking at what our systems recorded.",
 };
 
 const WAITING_LONGER = [

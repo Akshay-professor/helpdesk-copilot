@@ -67,12 +67,13 @@ const INTERNAL_TERMS = [
   // tool names
   "searchKnowledgeBase", "getCustomer", "getOrders", "getInvoices",
   "checkRefundEligibility", "issueRefund", "applyAccountCredit",
-  "escalateToHuman",
+  "escalateToHuman", "getSystemStatus", "lookupLogs", "changePlan",
   // error codes
   "policy_violation", "approval_required", "not_authorized",
   "customer_not_found", "order_not_found", "invalid_arguments",
   "invalid_json", "unknown_tool", "tool_execution_failed",
   "knowledge_base_unavailable", "not_eligible", "amount_exceeds_refundable",
+  "unknown_component",
   // internal concepts
   "system prompt", "tool call", "toolRegistry", "MAX_ITERATIONS",
   "autoApproveMax", "RELEVANCE_FLOOR",

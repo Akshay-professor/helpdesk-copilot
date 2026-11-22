@@ -305,6 +305,9 @@ async function synthesize(question, investigations, { model } = {}) {
       query: r.query,
       rowCount: r.n,
       error: r.error ?? null,
+      // A source's own limits (tickets: "explains why, not how many") must
+      // reach the writer, or it will happily compute a rate from complaints.
+      ...(r.caveat && { caveat: r.caveat }),
       // Cap the rows sent to the model. A large aggregate would crowd out the
       // instructions above, and the instructions are the whole point.
       data: r.error ? null : (r.rows ?? []).slice(0, 8),
@@ -570,6 +573,7 @@ async function runResearch(question, options = {}) {
       sources: [
         { name: "orderStats", args: { groupBy: "status" } },
         { name: "customerStats", args: {} },
+        { name: "searchTickets", args: { query: question } },
       ],
     },
   ];

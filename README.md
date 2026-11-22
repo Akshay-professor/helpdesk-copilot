@@ -73,7 +73,7 @@ flowchart TD
 
     IC -->|"UNRELATED"| REFUSE
     IC -->|"billing / refund /<br/>order / policy"| GU
-    IC -->|"novel"| AU["AUTONOMOUS<br/>all 9 tools"]
+    IC -->|"novel"| AU["AUTONOMOUS<br/>all 11 tools"]
 
     GU --> PLAN{"Multi-step?"}
     AU --> PLAN
@@ -157,7 +157,7 @@ flowchart LR
 
     subgraph CORE["Agent core"]
         RUNNER["agentRunner<br/>hand-written loop"]
-        TOOLS["9 tools<br/>registry pattern"]
+        TOOLS["11 tools<br/>registry pattern"]
         POLICY["policy + authorization"]
     end
 
@@ -328,7 +328,7 @@ npm install
 cp .env.example .env      # then open .env and paste your API keys
 
 node seed-db.js           # loads 3 customers, 6 orders, 5 invoices
-node index-kb.js          # loads 12 policy documents into ChromaDB
+node index-kb.js          # loads 12 policy docs + 16 past tickets into ChromaDB
 node src/server.js        # → http://localhost:5000
 ```
 
@@ -388,22 +388,25 @@ cd frontend && npm run dev            # terminal 2
 
 ## Testing
 
-24 suites, each demonstrating a **failure path** rather than a happy path.
+30 suites, each demonstrating a **failure path** rather than a happy path.
 
 ```bash
 cd backend
 node seed-db.js         # always reseed first — see below
 
-node test-agent.js         # the loop, tool errors, recovery
-node test-safety.js        # policy limits, iteration cap, refusals
-node test-authz.js         # cross-customer data access
-node test-hitl.js          # pause → restart → approve → resume
-node test-reflection.js    # catching a genuinely bad draft
-node test-routing.js       # the cheap path stays cheap
-node test-multiagent.js    # 32 isolation assertions
-node test-research.js      # admitting what it cannot determine
-node test-scope.js         # off-topic + prompt injection
-node test-voice.js         # needs the server running
+node tests/test-agent.js         # the loop, tool errors, recovery
+node tests/test-safety.js        # policy limits, iteration cap, refusals
+node tests/test-authz.js         # cross-customer data access
+node tests/test-hitl.js          # pause → restart → approve → resume
+node tests/test-reflection.js    # catching a genuinely bad draft
+node tests/test-routing.js       # the cheap path stays cheap
+node tests/test-multiagent.js    # 32 isolation assertions
+node tests/test-research.js      # admitting what it cannot determine
+node tests/test-scope.js         # off-topic + prompt injection
+node tests/test-voice.js         # needs the server running (same JWT_SECRET)
+
+npm run test:offline       # no LLM, no DB - what CI runs: policy limits, router
+                           # patterns, JWT, voice auth, technical tools, speech cache
 ```
 
 > **Always `node seed-db.js` before a regression run.** Refunds accumulate across runs, and a correctly capped refund looks exactly like a wrong answer. Two "failures" in this project turned out to be a drifted database rather than broken code.
@@ -444,6 +447,23 @@ Cross-domain went 0/3 → 3/3, and all 32 isolation assertions still pass.
 
 ---
 
+## Documentation
+
+| Doc | Build | Covers |
+|---|---|---|
+| [agent-loop.md](docs/agent-loop.md) | 1 | Loop design, caps, every exit, error handling, persistence, structured logs |
+| [tool-design.md](docs/tool-design.md) | 1 | Schemas, validation, structured errors, code-enforced limits, confirmation, grounding |
+| [planning-reflection.md](docs/planning-reflection.md) | 2 | Plan threshold, replanning, reflection criteria, revision cap |
+| [hitl-design.md](docs/hitl-design.md) | 2 | Approval tiers, pause/persist/resume, idempotency, 24h timeout, Redis vs Mongo |
+| [routing-strategy.md](docs/routing-strategy.md) | 2 | Three paths, why each category routes where it does, traffic distribution |
+| [multi-agent-analysis.md](docs/multi-agent-analysis.md) | 3 | Single vs multi-agent with measured numbers |
+| [voice-design.md](docs/voice-design.md) | 3 | Latency, speech formatting, filler, HITL over voice, barge-in, JWT, TTS cache |
+| [architecture-diagrams/](docs/architecture-diagrams/) | 1–3 | One diagram per build |
+| [cost-report.md](docs/cost-report.md) | 1–3 | Tokens and $ per request type; `backend/cost-report.js` regenerates it |
+| [demo-script.md](docs/demo-script.md) | 1–3 | The 11 required demonstrations, step by step |
+
+---
+
 ## API
 
 | Endpoint | Purpose |
@@ -454,7 +474,7 @@ Cross-domain went 0/3 → 3/3, and all 32 isolation assertions still pass.
 | `POST /research` · `GET /research/:id` | Start an investigation (SSE), reopen a report |
 | `GET /routing` · `GET /costs` | Route distribution, per-agent cost |
 | `GET /runs` · `GET /runs/:runId` | Full traces |
-| `WS /voice` | Voice call — **JWT in the header, never the URL** |
+| `POST /voice/token` · `WS /voice` | Voice call — a 60s JWT in **`Sec-WebSocket-Protocol`**, never the URL |
 
 > A URL is not a secret channel: it lands in access logs, proxies, browser history, and Referer headers. **The same secret can be safe in one place and public in another.**
 
@@ -467,7 +487,9 @@ Stated plainly, because a README that only lists strengths is a sales page.
 - **No real authentication.** `x-customer-id` is a header anyone can forge. The authorization *layer* is real and enforced on every tool; the identity behind it is not yet verified.
 - **Evaluation is thin.** 18 benchmark runs is not an eval suite. Production needs hundreds of cases and drift monitoring.
 - **Small fixture dataset.** 3 customers, 6 orders — enough to demonstrate every path, not enough for statistical claims. The research agent correctly reports low confidence because of this.
-- **Not deployed.** No CI, no container orchestration, no load testing.
+- **Not deployed.** CI runs only the offline checks (the LLM suites need keys and quota); no container orchestration, no load testing.
+- **Expired approvals are not announced.** After 24h they leave the queue and can no longer be approved, but no message reaches the customer — there is no outbound channel yet.
+- **Under-threshold writes still ask the customer.** Build 2's table says "autonomous, logged"; we kept a one-click customer confirmation (consent, not staff approval). See `docs/hitl-design.md`.
 - **Free-tier providers.** Groq's tail latency is unpredictable (p90 ~2.5s); every dependent path degrades gracefully rather than failing.
 
 ---
@@ -480,13 +502,13 @@ backend/src/
 ├── agents/         coordinator + billing/technical/account/research specialists
 ├── research/       decompose → investigate in parallel → cite → score confidence
 ├── voice/          STT · speech formatter · session (filler, barge-in) · WebSocket
-├── tools/          9 tools; adding one is a registration, not a loop change
+├── tools/          11 tools; adding one is a registration, not a loop change
 ├── policy/         limits and ownership, enforced in code
 ├── rag/            ChromaDB + relevance floor
 └── db/             models, persistence, connection
 
 frontend/src/       Chat · TraceViewer · ConfirmModal · OperatorQueue · CostDashboard
-docs/               assignment · autonomy policy · multi-agent analysis
+docs/               design docs per build · architecture diagrams · cost report · demo script
 ```
 
 ---

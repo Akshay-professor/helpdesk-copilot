@@ -32,6 +32,7 @@ const {
 } = require("../src/voice/speechFormat");
 const { interpretConfirmation, speakConfirmation } = require("../src/voice/voiceSession");
 const { isConfigured, MIN_AUDIO_BYTES } = require("../src/voice/stt");
+const { sign: signJwt } = require("../src/auth/jwt");
 
 const WS_URL = process.env.VOICE_WS_URL || "ws://localhost:5000/voice";
 
@@ -45,10 +46,9 @@ const line = (t) => console.log("\n" + "=".repeat(70) + `\n${t}\n` + "=".repeat(
 /** Open a call, run a script of timed actions, collect every event. */
 function call(script, { timeoutMs = 45000 } = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(WS_URL, {
-      // THE HEADER, NOT THE URL. See voiceServer.js.
-      headers: { Authorization: "Bearer cus_001" },
-    });
+    // THE HEADER, NOT THE URL - and a signed JWT, the same way the browser
+    // sends it: in Sec-WebSocket-Protocol. Needs the server's JWT_SECRET.
+    const ws = new WebSocket(WS_URL, ["helpdesk.v1", signJwt({ sub: "cus_001" }, 60)]);
     const events = [];
     const t0 = Date.now();
     const timers = [];
@@ -166,7 +166,7 @@ async function main() {
   // =====================================================================
   line("D.  A CALL, END TO END — over a real WebSocket");
 
-  console.log(`  ${WS_URL}, with the JWT in the AUTHORIZATION HEADER.\n` +
+  console.log(`  ${WS_URL}, with the JWT in SEC-WEBSOCKET-PROTOCOL.\n` +
     "  A URL is not a secret channel: it lands in access logs, proxies,\n" +
     "  browser history and Referer headers.\n");
 

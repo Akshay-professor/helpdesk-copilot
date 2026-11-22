@@ -21,6 +21,7 @@ const { runResearch, getReport, listReports } = require("./research/researchAgen
 // built-in constants module, which loads happily and has no RUN_STATUS on it.
 // So every status check would silently compare against undefined.
 const { RUN_STATUS } = require("./constants");
+const { sign: signJwt } = require("./auth/jwt");
 
 /**
  * Which architecture handles this request: the single agent, or the
@@ -838,6 +839,10 @@ function formatAgentResult(result) {
     // them failed, so an incomplete investigation is never presented as a
     // complete one.
     ...(result.multiAgent && { multiAgent: result.multiAgent }),
+    // Build 2 panels: the final plan (with step status and revision count)
+    // and every reflection verdict with the draft it judged.
+    ...(result.plan && { plan: result.plan, planRevisions: result.planRevisions ?? 0 }),
+    ...(result.reflections?.length && { reflections: result.reflections }),
   };
 
   if (result.status === RUN_STATUS.AWAITING_CONFIRMATION) {
@@ -867,6 +872,22 @@ function formatAgentResult(result) {
 
   return base;
 }
+
+/**
+ * POST /voice/token - a 60-second JWT for opening the voice WebSocket.
+ *
+ * The browser fetches this over HTTPS, then passes it in the
+ * Sec-WebSocket-Protocol header (see voice/voiceServer.js). Short-lived on
+ * purpose: it only has to survive the handshake, so a leaked one is useless
+ * a minute later.
+ *
+ * The subject comes from callerFrom() - the same stand-in identity /chat uses.
+ * When real login exists, this is the one line that changes; the WebSocket
+ * side already verifies a signed token.
+ */
+app.post("/voice/token", (req, res) => {
+  res.json({ token: signJwt({ sub: callerFrom(req) ?? null }, 60), expiresIn: 60 });
+});
 
 /**
  * Fallback for unmatched routes. Without this, Express returns an HTML error

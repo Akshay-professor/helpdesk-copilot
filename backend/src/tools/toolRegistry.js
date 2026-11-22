@@ -18,7 +18,7 @@
  * MongoDB instead of returning arrays, and nothing in this file changes.
  */
 
-const { REFUND_POLICY } = require("../data/seed");
+const { REFUND_POLICY, SYSTEM_STATUS, SERVICE_LOGS } = require("../data/seed");
 const repo = require("../data/repository");
 const vectorStore = require("../rag/vectorStore");
 const { requireOwnership } = require("../policy/authorization");
@@ -879,6 +879,92 @@ const TOOLS = {
   },
 
   // -------------------------------------------------------------------------
+  getSystemStatus: {
+    description:
+      "Current health of the platform's components (checkout, payments, " +
+      "shipping-tracking, accounts, email) and any known incident. Use it " +
+      "before blaming the customer for a problem the platform may be causing.",
+
+    parameters: {
+      type: "object",
+      properties: {
+        component: {
+          type: "string",
+          description: "Optional: one component to check. Omit for all.",
+          enum: SYSTEM_STATUS.map((s) => s.component),
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+
+    handler: async ({ component } = {}) => {
+      if (component === undefined) {
+        const degraded = SYSTEM_STATUS.filter((s) => s.status !== "operational");
+        return { components: SYSTEM_STATUS, degradedCount: degraded.length };
+      }
+      const hit = SYSTEM_STATUS.find((s) => s.component === component);
+      if (!hit) {
+        return toolError(
+          "unknown_component",
+          `No component named ${component}.`,
+          { known: SYSTEM_STATUS.map((s) => s.component) }
+        );
+      }
+      return { components: [hit], degradedCount: hit.status === "operational" ? 0 : 1 };
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  lookupLogs: {
+    description:
+      "Read recent service log lines for one customer, optionally narrowed " +
+      "to a service or an order/invoice reference. Use it to find the root " +
+      "cause of a failure (e.g. why a charge happened twice).",
+
+    parameters: {
+      type: "object",
+      properties: {
+        customerId: { type: "string", description: "The customer's ID, e.g. cus_001" },
+        service: {
+          type: "string",
+          description: "Optional service filter.",
+          enum: [...new Set(SERVICE_LOGS.map((l) => l.service))],
+        },
+        ref: { type: "string", description: "Optional order or invoice ID, e.g. ord_1001" },
+        limit: {
+          type: "integer",
+          description: "Maximum lines to return (1-50, default 20).",
+          minimum: 1,
+          maximum: 50,
+        },
+      },
+      required: ["customerId"],
+      additionalProperties: false,
+    },
+
+    handler: async ({ customerId, service, ref, limit = 20 }, ctx = {}) => {
+      // Logs are customer data: the same ownership guard as getOrders, and
+      // for the same reason - checked before existence.
+      const denied = requireOwnership(ctx, customerId, customerId);
+      if (denied) return denied;
+
+      if (!(await repo.findCustomerById(customerId))) {
+        return toolError("customer_not_found", `No customer exists with ID ${customerId}.`);
+      }
+
+      const lines = SERVICE_LOGS.filter(
+        (l) =>
+          l.customerId === customerId &&
+          (!service || l.service === service) &&
+          (!ref || l.ref === ref)
+      ).slice(0, limit);
+
+      return { customerId, count: lines.length, lines };
+    },
+  },
+
+  // -------------------------------------------------------------------------
   escalateToHuman: {
     description:
       "Raise this conversation to a human support agent. Use when you cannot " +
@@ -1031,6 +1117,9 @@ function validateArgs(schema, args) {
     }
     if (typeof spec.maximum === "number" && value > spec.maximum) {
       problems.push(`Field ${key} must be at most ${spec.maximum}.`);
+    }
+    if (Array.isArray(spec.enum) && !spec.enum.includes(value)) {
+      problems.push(`Field ${key} must be one of: ${spec.enum.join(", ")}.`);
     }
   }
 

@@ -45,6 +45,7 @@ const { RUN_STATUS } = require("../constants");
 
 const { callLLM } = require("../llm/llmClient");
 const { saveRun } = require("../db/persistence");
+const { logEvent } = require("../log");
 const {
   classifyRequest,
   makePlan,
@@ -209,6 +210,17 @@ function finish(result, state) {
     routeReason: state.routeReason ?? result.routeReason ?? null,
   };
   saveRun(full);
+  logEvent("run_end", {
+    runId: full.runId,
+    conversationId: full.conversationId,
+    route: full.route,
+    specialist: full.specialist,
+    status: full.status,
+    stoppedReason: full.stoppedReason ?? null,
+    iterations: full.iterations,
+    tokensUsed: full.tokensUsed,
+    durationMs: state.startedAt ? Date.now() - state.startedAt : null,
+  });
 
   if (typeof state.onEvent === "function") {
     try {
@@ -315,6 +327,15 @@ async function runLoop(state) {
 
     const iterStartedAt = Date.now();
     const assistantMessage = await callLLM({ messages, tools, model });
+    logEvent("llm_call", {
+      runId,
+      specialist: state.specialist ?? null,
+      iteration: iterations,
+      durationMs: Date.now() - iterStartedAt,
+      tokens: assistantMessage._usage?.total_tokens ?? 0,
+      provider: assistantMessage._provider ?? "mistral",
+      toolCalls: (assistantMessage.tool_calls ?? []).map((c) => c.function?.name),
+    });
 
     // Usage accounting. `_usage` is attached by llmClient; it may be absent if
     // the provider omits it, so default to 0 rather than producing NaN.
@@ -385,6 +406,9 @@ async function runLoop(state) {
             detail: f.detail,
           })),
           revision: revisions,
+          // The draft itself, so the reflection panel can show what was
+          // rejected next to what was finally sent.
+          draft,
         });
 
         if (verdict.verdict === "revise") {
@@ -515,6 +539,7 @@ async function runLoop(state) {
         callerId,
         kbCategories,
       });
+      logEvent("tool_exec", { runId, iteration: iterations, tool: name, ok, durationMs, error: ok ? null : result?.error ?? null });
 
       emit("tool_result", {
         tool: name,
@@ -555,6 +580,11 @@ async function runLoop(state) {
           (st) => st.status === "pending" && st.tool === call.name
         );
         if (step) step.status = call.ok ? "done" : "failed";
+      }
+      // Live step status for the plan viewer. Same `plan` event, flagged as
+      // progress so the UI does not count it as a revision.
+      if (entry.toolCalls.length > 0) {
+        emit("plan", { plan: plan.steps, revision: planRevisions, progress: true });
       }
 
       const verdict = shouldReplan(entry.toolCalls);
@@ -763,6 +793,7 @@ async function runAgent(userMessage, options = {}) {
         callerId,
       };
       saveRun(full);
+      logEvent("run_end", { runId: full.runId, route: routing.route, workflow: routing.workflow, status: "complete", iterations: 0, tokensUsed: 0, durationMs: Date.now() - startedAt });
       return full;
     }
     // Workflow declined to handle it - fall through to the agent.
@@ -887,6 +918,8 @@ async function resumeAgent(state, approved, options = {}) {
     content: null,
     toolCalls: [],
   };
+
+  logEvent("approval_resolved", { runId: state.runId, tool: pending.name, approved, modified: Boolean(modifiedArguments) });
 
   if (approved) {
     // Re-serialise the arguments so a modified approval flows through the SAME

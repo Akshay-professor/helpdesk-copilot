@@ -244,6 +244,44 @@ async function searchDocs({ query, limit = 4 }) {
   );
 }
 
+/**
+ * Semantic search over PAST SUPPORT TICKETS - a separate collection from the
+ * policy KB. Each hit carries its quarter, plan and outcome, so the synthesis
+ * can say "3 Q4 Pro tickets mention cancelling after a double charge".
+ *
+ * The `caveat` travels with every result on purpose: tickets come only from
+ * customers who wrote in, so they explain WHY, never HOW MANY.
+ */
+async function searchTickets({ query, limit = 6 }) {
+  const capped = Math.min(Math.max(Number(limit) || 6, 1), 10);
+  const { available, results } = await vectorStore.searchTickets(query, capped);
+
+  if (!available) {
+    return result("chromadb:ticket_history", query, [], {
+      error: "Ticket history could not be reached, so this source is missing.",
+    });
+  }
+
+  return result(
+    "chromadb:ticket_history",
+    query,
+    results.map((r) => ({
+      id: r.id,
+      subject: r.title,
+      quarter: r.quarter,
+      plan: r.plan,
+      outcome: r.outcome,
+      score: r.score,
+      text: r.text,
+    })),
+    {
+      caveat:
+        "Tickets are written only by customers who contacted support. They " +
+        "explain reasons; they are not a sample for computing rates.",
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SOURCE 3: the raw records, for questions the aggregates cannot answer
 // ---------------------------------------------------------------------------
@@ -319,6 +357,13 @@ const SOURCES = {
     fn: searchDocs,
     description: "Semantic search across company policy documents.",
     args: { query: "what to search for", limit: "1-8" },
+  },
+  searchTickets: {
+    fn: searchTickets,
+    description:
+      "Semantic search over past support tickets (with quarter, plan, outcome). " +
+      "Good for WHY customers were unhappy; not usable for rates.",
+    args: { query: "what to search for", limit: "1-10" },
   },
   sampleRecords: {
     fn: sampleRecords,

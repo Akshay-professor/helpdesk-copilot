@@ -108,6 +108,30 @@ export default function CostDashboard() {
 
       {routing?.routes?.length > 0 && (
         <>
+          {/* Build 2's headline number: how much traffic actually needed an
+              autonomous agent. A table makes you add it up; a bar does not. */}
+          <h3 className="section">Traffic split</h3>
+          <div className="split-bar" role="img" aria-label="Share of runs per route">
+            {routing.routes.map((r) => (
+              <span
+                key={r.route}
+                className={`split-seg ${["workflow", "guided", "autonomous"].includes(r.route) ? r.route : "other"}`}
+                style={{ width: `${r.percentage}%` }}
+                title={`${r.route}: ${r.count} runs (${r.percentage}%)`}
+              >
+                {r.percentage >= 8 ? `${Math.round(r.percentage)}%` : ""}
+              </span>
+            ))}
+          </div>
+          <div className="split-legend">
+            {routing.routes.map((r) => (
+              <span key={r.route}>
+                <strong>{r.route}</strong> {r.percentage}% ({r.count})
+              </span>
+            ))}
+            <span>of {routing.total} runs</span>
+          </div>
+
           <h3 className="section">Per route</h3>
           <div className="cost-table">
             <div className="cost-row cost-head route-row">
