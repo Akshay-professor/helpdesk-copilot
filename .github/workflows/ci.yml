@@ -77,3 +77,7 @@ jobs:
       - name: Speech rewrite cache (TTS response caching)
         working-directory: backend
         run: node tests/test-speech-cache.js
+
+      - name: Out-of-policy writes refused before the approval pause
+        working-directory: backend
+        run: node tests/test-refuse-before-pause.js

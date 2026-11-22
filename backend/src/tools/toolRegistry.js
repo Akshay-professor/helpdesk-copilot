@@ -1246,6 +1246,24 @@ function describeToolCall(name, rawArgs) {
     };
   }
 
+  // An amount no human may approve must not be offered for approval. Without
+  // this, a $5,000 refund paused, sat in the operator queue, and was refused
+  // only after someone clicked Approve. Same policy function the handler uses.
+  const gate =
+    name === "issueRefund" ? checkRefundAmount(args.amount)
+    : name === "applyAccountCredit" ? checkCreditAmount(args.amount)
+    : null;
+  if (gate?.tier === TIER.REFUSE) {
+    return {
+      ok: false,
+      error: toolError("policy_violation", gate.reason, {
+        requestedAmount: args.amount,
+        limit: gate.limit,
+        tier: gate.tier,
+      }),
+    };
+  }
+
   // Fall back to a generic description if a write tool has no summarize().
   // Better a dull confirmation than a crash - and the tool still gets gated.
   const summary = tool.summarize
